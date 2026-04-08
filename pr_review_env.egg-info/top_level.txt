@@ -1,2 +1,0 @@
-pr_review_env
-server

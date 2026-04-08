@@ -85,7 +85,7 @@ def compute_reward_breakdown(observation: Observation, action: Action, gold: dic
 
     base = (decision + labels + priority + summary) / 4.0
     step_penalty = max(observation.current_step - 1, 0) * 0.02
-    total = max(0.0, min(1.0, base - step_penalty))
+    total = max(0.001, min(0.999, base - step_penalty))
 
     return Reward(
         decision_score=decision,

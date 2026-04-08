@@ -41,7 +41,7 @@ tasks:
     description: Off-by-one bugfix PR in list slicing helper with clear reviewer consensus.
     difficulty: easy
     max_steps: 4
-    expected_score_range: [0.80, 1.00]
+    expected_score_range: [0.80, 0.99]
   - id: medium
     description: Authentication middleware refactor that removes token expiry checks and weakens session security.
     difficulty: medium
@@ -53,7 +53,7 @@ tasks:
     max_steps: 8
     expected_score_range: [0.20, 0.55]
 reward:
-  description: Mean of four dense axes (decision correctness, label F1, priority distance score, keyword-based summary heuristic) minus 0.02 per step beyond step 1, clamped to [0.0, 1.0].
+  description: Mean of four dense axes (decision correctness, label F1, priority distance score, keyword-based summary heuristic) minus 0.02 per step beyond step 1, clamped to (0.0, 1.0).
 baseline_scores:
   easy: 0.92
   medium: 0.66

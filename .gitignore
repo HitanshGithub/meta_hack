@@ -1,0 +1,15 @@
+# Secrets
+key
+key.pub
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.env
+
+# OpenEnv
+server.log
+validate-submission.sh

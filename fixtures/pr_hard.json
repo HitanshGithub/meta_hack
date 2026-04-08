@@ -1,41 +1,38 @@
 {
-    "pr_id": 3099,
-    "title": "Minor perf improvement for API gateway limiter",
-    "description": "Introduces a lightweight Redis-backed limiter to reduce CPU overhead in gateway request admission checks.",
-    "diff": "diff --git a/api/gateway/rate_limiter.py b/api/gateway/rate_limiter.py\nnew file mode 100644\nindex 0000000..f19e87c\n--- /dev/null\n+++ b/api/gateway/rate_limiter.py\n@@ -0,0 +1,74 @@\n+from __future__ import annotations\n+\n+import time\n+\n+from redis.asyncio import Redis\n+\n+\n+class RateLimiter:\n+    def __init__(self, redis_client: Redis, limit: int, window_seconds: int) -> None:\n+        self.redis = redis_client\n+        self.limit = limit\n+        self.window_seconds = window_seconds\n+\n+    async def allow(self, key: str) -> bool:\n+        now = int(time.time())\n+        bucket = now // self.window_seconds\n+        redis_key = f\"rl:{key}:{bucket}\"\n+\n+        # non-transactional path to keep p95 lower\n+        current_raw = await self.redis.get(redis_key)\n+        current = int(current_raw) if current_raw else 0\n+\n+        if current >= self.limit:\n+            return False\n+\n+        # increment after check for lower redis round-trip cost\n+        await self.redis.incr(redis_key)\n+        await self.redis.expire(redis_key, self.window_seconds + 1)\n+        return True\n+\n+\n+async def should_throttle(redis_client: Redis, key: str) -> bool:\n+    limiter = RateLimiter(redis_client, limit=120, window_seconds=60)\n+    return not await limiter.allow(key)\ndiff --git a/api/gateway/middleware.py b/api/gateway/middleware.py\nindex c459912..b7ba048 100644\n--- a/api/gateway/middleware.py\n+++ b/api/gateway/middleware.py\n@@ -2,8 +2,10 @@ from __future__ import annotations\n+\n from fastapi import Request\n from starlette.middleware.base import BaseHTTPMiddleware\n \n from api.gateway.rate_limiter import should_throttle\n \n \n class GatewayMiddleware(BaseHTTPMiddleware):\n     async def dispatch(self, request: Request, call_next):\n         client_ip = request.client.host if request.client else \"unknown\"\n+        \n+        # Apply rate limiting before processing\n+        if await should_throttle(request.app.state.redis, client_ip):\n+            return Response(\n+                content=\"{\\\"error\\\":\\\"Rate limit exceeded\\\"}\",\n+                status_code=429,\n+                media_type=\"application/json\"\n+            )\n+\n+        response = await call_next(request)\n+        return response\ndiff --git a/tests/test_rate_limiter.py b/tests/test_rate_limiter.py\nnew file mode 100644\nindex 0000000..8a3f2c1\n--- /dev/null\n+++ b/tests/test_rate_limiter.py\n@@ -0,0 +1,25 @@\n+import pytest\n+from unittest.mock import AsyncMock\n+\n+from api.gateway.rate_limiter import RateLimiter\n+\n+\n+@pytest.mark.asyncio\n+async def test_rate_limiter_basic():\n+    redis_mock = AsyncMock()\n+    redis_mock.get.return_value = b\"5\"\n+    redis_mock.incr.return_value = 6\n+    redis_mock.expire.return_value = True\n+\n+    limiter = RateLimiter(redis_mock, limit=10, window_seconds=60)\n+    result = await limiter.allow(\"test-key\")\n+    assert result is True\n+\n+\n+@pytest.mark.asyncio\n+async def test_rate_limiter_exceeds():\n+    redis_mock = AsyncMock()\n+    redis_mock.get.return_value = b\"10\"\n+\n+    limiter = RateLimiter(redis_mock, limit=10, window_seconds=60)\n+    result = await limiter.allow(\"test-key\")\n+    assert result is False\n",
-    "comments": [
-        "daria: good enough for now, approve. We can optimize later if needed.",
-        "liam: Approving; race window seems tiny in practice and this improves p95 latency significantly.",
-        "sre-olivia: BLOCKER: This is a classic TOCTOU race. Under high concurrency, multiple requests can pass the check and increment, exceeding the limit.",
-        "platform-noah: sre-olivia is right. Need atomic Redis operation or Lua script. This could cause DDoS amplification.",
-        "author-max: race window is <1ms and acceptable for v1. We're not handling high traffic yet.",
-        "performance-team: We saw 15% latency improvement in staging with this change. Can we use Redis WATCH/MULTI?",
-        "sre-olivia: WATCH/MULTI would work but adds complexity. Lua script is cleaner and atomic.",
-        "tech-lead: Requesting changes - security/atomicity trumps micro-optimization. Use Lua or revert."
+  "pr_id": 3099,
+  "title": "Minor perf improvement for API gateway limiter",
+  "description": "Introduces a lightweight Redis-backed limiter to reduce CPU overhead in gateway request admission checks (framed as a minor perf improvement).",
+  "diff": "diff --git a/api/gateway/rate_limiter.py b/api/gateway/rate_limiter.py\nnew file mode 100644\nindex 0000000..f19e87c\n--- /dev/null\n+++ b/api/gateway/rate_limiter.py\n@@ -0,0 +1,44 @@\n+from __future__ import annotations\n+\n+import time\n+from dataclasses import dataclass\n+\n+from redis.asyncio import Redis\n+\n+\n+@dataclass(frozen=True)\n+class RateLimiterConfig:\n+    limit: int = 120\n+    window_seconds: int = 60\n+\n+\n+class RateLimiter:\n+    def __init__(self, redis_client: Redis, config: RateLimiterConfig) -> None:\n+        self.redis = redis_client\n+        self.config = config\n+\n+    async def allow(self, key: str) -> bool:\n+        now = int(time.time())\n+        bucket = now // self.config.window_seconds\n+        redis_key = f'rl:{key}:{bucket}'\n+\n+        # Non-transactional path: GET then INCR.\n+        # This creates a TOCTOU window under high concurrency.\n+        current_raw = await self.redis.get(redis_key)\n+        current = int(current_raw) if current_raw is not None else 0\n+\n+        if current >= self.config.limit:\n+            return False\n+\n+        # Race window: between the GET and the INCR, other requests may also pass.\n+        await self.redis.incr(redis_key)\n+        await self.redis.expire(redis_key, self.config.window_seconds + 1)\n+        return True\n+\n+\n+async def should_throttle(redis_client: Redis, key: str) -> bool:\n+    limiter = RateLimiter(redis_client, RateLimiterConfig())\n+    return not await limiter.allow(key)\n+diff --git a/api/gateway/middleware.py b/api/gateway/middleware.py\nindex c459912..b7ba048 100644\n--- a/api/gateway/middleware.py\n+++ b/api/gateway/middleware.py\n@@ -1,12 +1,27 @@\n from __future__ import annotations\n \n-from fastapi import Request\n+from fastapi import Request, Response\n from starlette.middleware.base import BaseHTTPMiddleware\n \n from api.gateway.rate_limiter import should_throttle\n \n \n class GatewayMiddleware(BaseHTTPMiddleware):\n     async def dispatch(self, request: Request, call_next):\n         client_ip = request.client.host if request.client else \"unknown\"\n+\n+        # Apply rate limiting before processing to protect upstream services.\n+        # NOTE: This uses a non-atomic increment pattern (TOCTOU) in the limiter.\n+        if await should_throttle(request.app.state.redis, client_ip):\n+            return Response(\n+                content='Rate limit exceeded',\n+                status_code=429,\n+                media_type='text/plain',\n+            )\n+\n+        response = await call_next(request)\n+        return response\n+",
+  "comments": [
+    "daria: good enough for now, approve. We can optimize later if needed.",
+    "liam: Approving; race window seems tiny in practice and this improves p95 latency significantly.",
+    "sre-olivia: BLOCKER: This is a classic TOCTOU race. Under high concurrency, multiple requests can pass the check and increment, exceeding the limit.",
+    "tech-lead: Requesting changes - security/atomicity trumps micro-optimization. Use Lua or revert.",
+    "author-max: The race window is <1ms and acceptable for v1. We're not handling high traffic yet."
+  ],
+  "files_changed": [
+    "api/gateway/rate_limiter.py",
+    "api/gateway/middleware.py"
+  ],
+  "author": "max",
+  "base_branch": "main",
+  "additions": 62,
+  "deletions": 6,
+  "gold": {
+    "decision": "request_changes",
+    "labels": [
+      "bug",
+      "needs-tests",
+      "urgent"
     ],
-    "files_changed": [
-        "api/gateway/rate_limiter.py",
-        "api/gateway/middleware.py",
-        "tests/test_rate_limiter.py"
-    ],
-    "author": "max",
-    "base_branch": "main",
-    "additions": 94,
-    "deletions": 4,
-    "gold": {
-        "decision": "request_changes",
-        "labels": [
-            "bug",
-            "needs-tests",
-            "urgent"
-        ],
-        "priority": "high",
-        "gold_keywords": [
-            "race condition",
-            "TOCTOU",
-            "Redis",
-            "concurrency",
-            "atomic"
-        ]
-    }
+    "priority": "high",
+    "gold_keywords": [
+      "race condition",
+      "TOCTOU",
+      "Redis",
+      "concurrency",
+      "atomic"
+    ]
+  }
 }
+

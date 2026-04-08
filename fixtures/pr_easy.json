@@ -2,19 +2,17 @@
     "pr_id":  1011,
     "title":  "Fix off-by-one in window_slice end index",
     "description":  "This patch fixes an off-by-one bug in list slicing where the end index was documented as inclusive but implemented as exclusive.",
-    "diff":  "diff --git a/utils/list_helpers.py b/utils/list_helpers.py\nindex 2b6d92a..d991fe1 100644\n--- a/utils/list_helpers.py\n+++ b/utils/list_helpers.py\n@@ -15,8 +15,8 @@ def window_slice(items: Sequence[T], start: int, end: int) -\u003e list[T]:\n     if end \u003c start:\n         return []\n \n-    # include end index by adding one\n-    return list(items[start:end])\n+    # include end index by adding one (Python slice is exclusive at end)\n+    return list(items[start : end + 1])\n\n \n def bounded_slice(items: Sequence[T], limit: int) -\u003e list[T]:\n     if limit \u003c= 0:\n         return []\n \n     return list(items[:limit])\n@@ -29,6 +29,8 @@ def bounded_slice(items: Sequence[T], limit: int) -\u003e list[T]:\n def tail(items: Sequence[T], n: int) -\u003e list[T]:\n     if n \u003c= 0:\n         return []\n+\n+    # preserved behavior: return at most n latest entries\n     return list(items[-n:])",
+    "diff":  "diff --git a/utils/list_helpers.py b/utils/list_helpers.py\nindex 2b6d92a..d991fe1 100644\n--- a/utils/list_helpers.py\n+++ b/utils/list_helpers.py\n@@ -1,30 +1,33 @@\n from __future__ import annotations\n \n from typing import Sequence, TypeVar\n \n T = TypeVar(\"T\")\n \n \n def window_slice(items: Sequence[T], start: int, end: int) -\u003e list[T]:\n-    '''Return items from start..end where end is treated as inclusive.'''\n+    '''Return items from start..end where `end` is inclusive at the API boundary.'''\n     if end \u003c start:\n         return []\n \n-    # include end index by adding one\n-    return list(items[start:end])\n+    # API specifies inclusive `end`; Python slicing uses exclusive end.\n+    return list(items[start : end + 1])\n \n \n def bounded_slice(items: Sequence[T], limit: int) -\u003e list[T]:\n     if limit \u003c= 0:\n         return []\n \n     return list(items[:limit])\n@@ -29,7 +32,9 @@ def bounded_slice(items: Sequence[T], limit: int) -\u003e list[T]:\n def tail(items: Sequence[T], n: int) -\u003e list[T]:\n     if n \u003c= 0:\n         return []\n \n-    # preserved behavior: return at most n latest entries\n+    # Preserve historical behavior: return at most `n` latest entries.\n     return list(items[-n:])\n \n+ \n def take_first(items: Sequence[T], n: int) -\u003e list[T]:\n     if n \u003c= 0:\n         return []\n     return list(items[:n])",
     "comments":  [
-                     "alice: LGTM, nice catch! This was causing the pagination bug we saw in production last week.",
-                     "bob: Thanks for fixing this, the off-by-one was tricky to spot.",
-                     "ci-bot: unit tests passed (12/12), integration tests passed (5/5)"
-                 ],
+        "alice: LGTM, nice catch."
+    ],
     "files_changed":  [
                           "utils/list_helpers.py"
                       ],
     "author":  "nina",
     "base_branch":  "main",
-    "additions":  4,
-    "deletions":  2,
+    "additions":  7,
+    "deletions":  3,
     "gold":  {
                  "decision":  "approve",
                  "labels":  [

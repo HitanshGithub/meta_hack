@@ -6,20 +6,23 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     HOME=/home/user \
     PATH=/home/user/.local/bin:$PATH
 
-# Install system dependencies if needed
-# RUN apt-get update && apt-get install -y ... && rm -rf /var/lib/apt/lists/*
-
-# Create a non-privileged user (Hugging Face default is often UID 1000)
+# Create a non-privileged user
 RUN useradd -m -u 1000 user
 USER user
 WORKDIR $HOME/app
 
-# Copy and install requirements first for better caching
+# Copy configuration first
 COPY --chown=user requirements.txt $HOME/app/requirements.txt
+COPY --chown=user pyproject.toml $HOME/app/pyproject.toml
+
+# Install dependencies
 RUN pip install --no-cache-dir --user -r $HOME/app/requirements.txt
 
-# Copy the rest of the application
-COPY --chown=user . $HOME/app
+# Explicitly copy required source code folders
+COPY --chown=user server/ $HOME/app/server/
+COPY --chown=user pr_review_env/ $HOME/app/pr_review_env/
+COPY --chown=user fixtures/ $HOME/app/fixtures/
+COPY --chown=user openenv.yaml $HOME/app/openenv.yaml
 
 # Expose the default Hugging Face port
 EXPOSE 7860

@@ -56,8 +56,8 @@ python inference.py
 
 # Must output exact format:
 # [START] task=easy env=pr-review-env model=...
-# [STEP] step=1 action=... reward=<0.00> done= error=
-# [END] success=true steps=1 score=<0.00> rewards=...
+# [STEP] step=1 action=... reward=0.00 done= error=null
+# [END] success=true steps=1 score=0.00 rewards=...
 ```
 
 ### 5. Tasks + Graders Test
@@ -117,8 +117,8 @@ time python inference.py
 ```bash
 # Must exactly match this pattern:
 [START] task=easy env=pr-review-env model=Qwen/Qwen2.5-72B-Instruct
-[STEP] step=1 action={"decision":"approve","labels":["bug"],"priority":"low","review_summary":"LGTM"} reward=<0.95> done=true error=
-[END] success=true steps=1 score=<0.95> rewards=0.95
+[STEP] step=1 action={"decision":"approve","labels":["bug"],"priority":"low","review_summary":"LGTM"} reward=0.95 done=true error=null
+[END] success=true steps=1 score=0.95 rewards=0.95
 
 # No deviation in field names, ordering, or formatting
 ```

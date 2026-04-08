@@ -124,9 +124,8 @@ Optional env vars:
 ### Expected Output Format
 ```
 [START] task=easy env=pr-review-env model=Qwen/Qwen2.5-72B-Instruct
-[DEBUG] LLM response: {"decision":"approve","labels":["bug"],"priority":"low","review_summary":"LGTM - fixes the off-by-one error correctly."}
-[STEP] step=1 action={"decision":"approve","labels":["bug"],"priority":"low","review_summary":"LGTM - fixes the off-by-one error correctly."} reward=<0.95> done=true error=
-[END] success=true steps=1 score=<0.95> rewards=0.95
+[STEP] step=1 action={"decision":"approve","labels":["bug"],"priority":"low","review_summary":"LGTM - fixes the off-by-one error correctly."} reward=0.95 done=true error=null
+[END] success=true steps=1 score=0.95 rewards=0.95
 [START] task=medium env=pr-review-env model=Qwen/Qwen2.5-72B-Instruct
 ...
 ```

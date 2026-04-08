@@ -69,8 +69,8 @@ export HF_TOKEN=your_actual_token
 ### Output Format: COMPLIANT
 ```
 [START] task=easy env=pr-review-env model=Qwen/Qwen2.5-72B-Instruct
-[STEP] step=1 action={"decision":"approve","labels":["bug"],"priority":"low","review_summary":"LGTM"} reward=<0.95> done=true error=
-[END] success=true steps=1 score=<0.95> rewards=0.95
+[STEP] step=1 action={"decision":"approve","labels":["bug"],"priority":"low","review_summary":"LGTM"} reward=0.95 done=true error=null
+[END] success=true steps=1 score=0.95 rewards=0.95
 ```
 
 ---

@@ -29,7 +29,7 @@ TASK_CONFIGS: dict[str, TaskConfig] = {
         fixture=EASY_FIXTURE,
         gold=EASY_GOLD,
         max_steps=4,
-        expected_score_range=(0.05, 0.95),
+        expected_score_range=(0.01, 0.95),
     ),
     "medium": TaskConfig(
         task_id="medium",
@@ -38,7 +38,7 @@ TASK_CONFIGS: dict[str, TaskConfig] = {
         fixture=MEDIUM_FIXTURE,
         gold=MEDIUM_GOLD,
         max_steps=6,
-        expected_score_range=(0.05, 0.95),
+        expected_score_range=(0.01, 0.95),
     ),
     "hard": TaskConfig(
         task_id="hard",
@@ -47,7 +47,7 @@ TASK_CONFIGS: dict[str, TaskConfig] = {
         fixture=HARD_FIXTURE,
         gold=HARD_GOLD,
         max_steps=8,
-        expected_score_range=(0.05, 0.95),
+        expected_score_range=(0.01, 0.95),
     ),
 }
 

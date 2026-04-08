@@ -16,8 +16,8 @@ API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 MODEL_NAME = os.getenv("MODEL_NAME", "Qwen/Qwen2.5-72B-Instruct")
 HF_TOKEN = os.getenv("HF_TOKEN", "")
 MAX_STEPS = 8
-_MIN_SCORE = 0.001
-_MAX_SCORE = 0.999
+_MIN_SCORE = 0.01
+_MAX_SCORE = 0.95
 
 
 SYSTEM_PROMPT = """You are a senior code review triage agent with 10+ years of experience in infrastructure and security.

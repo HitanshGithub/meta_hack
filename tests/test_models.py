@@ -203,15 +203,15 @@ class TestRewardModel:
         """Test score bounds are enforced"""
         # Valid scores
         reward = Reward(
-            decision_score=0.001,
+            decision_score=0.01,
             label_score=0.5,
-            priority_score=0.999,
-            summary_score=0.001,
+            priority_score=0.95,
+            summary_score=0.01,
             step_penalty=0.0,
             total=0.375
         )
-        assert reward.decision_score == 0.001
-        assert reward.priority_score == 0.999
+        assert reward.decision_score == 0.01
+        assert reward.priority_score == 0.95
 
         # Invalid scores (should be rejected by Pydantic)
         with pytest.raises(ValueError):
@@ -270,19 +270,19 @@ class TestStepResultModel:
         # Valid reward
         result = StepResult(
             observation=obs,
-            reward=0.001,  # Minimum strictly greater than 0
+            reward=0.01,  # Minimum strictly greater than 0
             done=False,
             info={}
         )
-        assert result.reward == 0.001
+        assert result.reward == 0.01
 
         result = StepResult(
             observation=obs,
-            reward=0.999,  # Maximum strictly less than 1
+            reward=0.95,  # Maximum strictly less than 1
             done=False,
             info={}
         )
-        assert result.reward == 0.999
+        assert result.reward == 0.95
 
         # Invalid reward (should be rejected by Pydantic)
         with pytest.raises(ValueError):

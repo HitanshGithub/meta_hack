@@ -19,7 +19,7 @@ class TestPRReviewEnv:
         assert env._task_name == "easy"
         assert env._current_step == 1
         assert env._done is False
-        assert env._last_reward == 0.001
+        assert env._last_reward == 0.01
         assert len(env._history) == 0
 
     def test_reset_valid_task(self):

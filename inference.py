@@ -7,7 +7,11 @@ import sys
 from typing import Any
 from urllib import error, request
 
+from dotenv import load_dotenv
 from openai import OpenAI
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 ENV_NAME = "pr-review-env"

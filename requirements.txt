@@ -3,3 +3,4 @@ uvicorn>=0.44.0
 pydantic>=2.12.5
 openai>=2.7.2
 openenv-core>=0.2.3
+python-dotenv>=1.0.0

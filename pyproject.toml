@@ -10,24 +10,27 @@ authors = [
     { name = "Meta Infra Tooling" }
 ]
 dependencies = [
-    "fastapi==0.111.0",
-    "uvicorn==0.30.1",
-    "pydantic==2.7.4",
-    "openai==1.35.10",
+    "fastapi>=0.111.0",
+    "uvicorn>=0.30.1",
+    "pydantic>=2.7.4",
+    "openai>=1.35.10",
+    "openenv-core>=0.2.3",
 ]
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 keywords = ["openenv", "code-review", "triage", "benchmarking"]
 
+[project.scripts]
+server = "server.app:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest",
-    "openenv-core",
 ]
 
 [tool.setuptools]
-packages = ["pr_review_env", "pr_review_env.tasks"]
+packages = ["pr_review_env", "pr_review_env.tasks", "server"]
 
 [tool.setuptools.package-data]
 "*" = ["*.json", "*.yaml"]

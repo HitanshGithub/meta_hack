@@ -334,3 +334,14 @@ def get_metrics() -> dict[str, object]:
         "available_tasks": list(TASK_CONFIGS.keys()),
         "timestamp": time.time()
     }
+
+def main():
+    import uvicorn
+    import sys
+    import os
+    # Ensure root is in path so pr_review_env can be imported
+    sys.path.append(os.getcwd())
+    uvicorn.run("server.app:app", host="0.0.0.0", port=7860, reload=False)
+
+if __name__ == "__main__":
+    main()

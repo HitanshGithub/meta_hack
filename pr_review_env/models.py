@@ -67,18 +67,18 @@ class Action(BaseModel):
 class Reward(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    decision_score: float = Field(ge=0.0, le=1.0)
-    label_score: float = Field(ge=0.0, le=1.0)
-    priority_score: float = Field(ge=0.0, le=1.0)
-    summary_score: float = Field(ge=0.0, le=1.0)
+    decision_score: float = Field(gt=0.0, lt=1.0)
+    label_score: float = Field(gt=0.0, lt=1.0)
+    priority_score: float = Field(gt=0.0, lt=1.0)
+    summary_score: float = Field(gt=0.0, lt=1.0)
     step_penalty: float = Field(ge=0.0)
-    total: float = Field(ge=0.0, le=1.0)
+    total: float = Field(gt=0.0, lt=1.0)
 
 
 class StepResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     observation: Observation
-    reward: float = Field(ge=0.0, le=1.0)
+    reward: float = Field(gt=0.0, lt=1.0)
     done: bool
     info: dict[str, Any]

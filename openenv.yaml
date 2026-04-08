@@ -1,0 +1,60 @@
+name: pr-review-env
+version: 1.0.0
+description: Deterministic pull request code review triage environment for evaluating decision quality, label selection, priority judgment, and review writing.
+author: Meta Infra Tooling
+tags:
+  - code-review
+  - pull-request
+  - triage
+  - developer-tooling
+  - deterministic-grading
+observation_space:
+  pr_id: int
+  title: str
+  description: str
+  diff: str
+  comments: list[str]
+  files_changed: list[str]
+  author: str
+  base_branch: str
+  additions: int
+  deletions: int
+  current_step: int
+  max_steps: int
+  task_name: str
+action_space:
+  decision:
+    type: enum
+    values: [approve, request_changes, close]
+  labels:
+    type: list[str]
+    values: [bug, security, enhancement, documentation, breaking-change, needs-tests, trivial, urgent]
+  priority:
+    type: enum
+    values: [low, medium, high, critical]
+  review_summary:
+    type: str
+    min_length: 1
+    max_length: 500
+tasks:
+  - id: easy
+    description: Off-by-one bugfix PR in list slicing helper with clear reviewer consensus.
+    difficulty: easy
+    max_steps: 4
+    expected_score_range: [0.80, 1.00]
+  - id: medium
+    description: Authentication middleware refactor that removes token expiry checks and weakens session security.
+    difficulty: medium
+    max_steps: 6
+    expected_score_range: [0.50, 0.75]
+  - id: hard
+    description: Redis-backed API gateway rate limiter with TOCTOU race condition under concurrency and conflicting reviewer opinions.
+    difficulty: hard
+    max_steps: 8
+    expected_score_range: [0.20, 0.55]
+reward:
+  description: Mean of four dense axes (decision correctness, label F1, priority distance score, keyword-based summary heuristic) minus 0.02 per step beyond step 1, clamped to [0.0, 1.0].
+baseline_scores:
+  easy: 0.92
+  medium: 0.66
+  hard: 0.39

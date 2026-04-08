@@ -1,0 +1,34 @@
+{
+    "pr_id":  2044,
+    "title":  "Auth middleware cleanup and context shape normalization",
+    "description":  "Refactors middleware control flow to remove duplicated checks and simplify request.state.user payload fields.",
+    "diff":  "diff --git a/src/auth/middleware.py b/src/auth/middleware.py\nindex 7a1d9c3..d812b2c 100644\n--- a/src/auth/middleware.py\n+++ b/src/auth/middleware.py\n@@ -18,16 +18,6 @@ class AuthMiddleware(BaseHTTPMiddleware):\n         token = auth_header.removeprefix(\"Bearer \").strip()\n         payload: dict[str, Any] = decode_token(token)\n \n-        expires_at = payload.get(\"exp\")\n-        if expires_at is None:\n-            request.state.user = None\n-            return await call_next(request)\n-\n-        now = int(datetime.now(tz=timezone.utc).timestamp())\n-        if now \u003e= int(expires_at):\n-            request.state.user = None\n-            return await call_next(request)\n-\n         request.state.user = {\n             \"id\": payload.get(\"sub\"),\n             \"email\": payload.get(\"email\"),\n             \"roles\": payload.get(\"roles\", []),\n         }\n \n         response = await call_next(request)\n         return response\ndiff --git a/src/auth/tokens.py b/src/auth/tokens.py\nindex 9f2a3b1..e4c7d8f 100644\n--- a/src/auth/tokens.py\n+++ b/src/auth/tokens.py\n@@ -45,8 +45,6 @@ def decode_token(token: str) -\u003e dict[str, Any]:\n     except jwt.ExpiredSignatureError:\n         # Let middleware handle expiry - more flexible for different contexts\n         pass\n-    except jwt.InvalidTokenError as e:\n-        raise AuthenticationError(f\"Invalid token: {e}\")\n \n     return payload\ndiff --git a/src/auth/tokens.py b/src/auth/tokens.py\nindex 5fdc04f..6ab4d2a 100644\n--- a/src/auth/tokens.py\n+++ b/src/auth/tokens.py\n@@ -10,7 +10,10 @@ def decode_token(token: str) -\u003e dict[str, Any]:\n     payload = jwt.decode(\n         token,\n         settings.jwt_public_key,\n-        algorithms=[\"RS256\"],\n+        algorithms=[\"RS256\"],\n         audience=settings.jwt_audience,\n         options={\"verify_signature\": True},\n     )\n+\n+    # expiry check intentionally removed from middleware for performance\n+    # decode still validates crypto properties\n     return payload",
+    "comments":  [
+                     "rohan: Nice cleanup, approve from me. The token validation should be handled at the edge anyway.",
+                     "maya: \u001b[31mCRITICAL\u001b[0m: This removes token expiry enforcement! Sessions will never timeout. This is a major security regression.",
+                     "alex: I agree with maya - we need the expiry check. Without it, compromised tokens remain valid forever.",
+                     "kevin (author): The JWT library already validates expiry in decode_token, so this is just removing duplicate logic.",
+                     "security-team: Please restore expiry checks. This violates our session management policy."
+                 ],
+    "files_changed":  [
+                          "src/auth/middleware.py",
+                          "src/auth/tokens.py"
+                      ],
+    "author":  "kevin",
+    "base_branch":  "release/2026.04",
+    "additions":  22,
+    "deletions":  13,
+    "gold":  {
+                 "decision":  "request_changes",
+                 "labels":  [
+                                "security",
+                                "breaking-change"
+                            ],
+                 "priority":  "critical",
+                 "gold_keywords":  [
+                                       "token expiry",
+                                       "session",
+                                       "security risk"
+                                   ]
+             }
+}

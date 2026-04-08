@@ -11,10 +11,10 @@ _PRIORITY_ORDER: dict[str, int] = {
     "critical": 3,
 }
 
-# All scores are clamped to [0.01, 0.95] — strictly between 0 and 1
+# All scores are clamped to [0.01, 0.99] — strictly between 0 and 1
 # as required by the OpenEnv validator.
 _MIN_SCORE = 0.01
-_MAX_SCORE = 0.95
+_MAX_SCORE = 0.99
 
 
 def _clamp(value: float) -> float:

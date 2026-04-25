@@ -26,7 +26,7 @@ Return only valid JSON with this exact schema:
   "decision": "approve|request_changes|close",
   "labels": ["bug|security|enhancement|documentation|breaking-change|needs-tests|trivial|urgent"],
   "priority": "low|medium|high|critical",
-  "review_summary": "1-3 sentence review summary"
+  "review_summary": "One concise sentence (max 30 words)"
 }
 """
 
@@ -57,28 +57,154 @@ def strip_code_fences(raw: str) -> str:
     return cleaned.strip()
 
 
+def _extract_first_json_object(raw: str) -> str | None:
+    text = strip_code_fences(raw)
+    if not text:
+        return None
+    # Fast path: entire response is JSON.
+    if text.startswith("{") and text.endswith("}"):
+        return text
+    # Robust path: find the first balanced JSON object in free-form output.
+    start = text.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_str = False
+    escape = False
+    for idx in range(start, len(text)):
+        ch = text[idx]
+        if in_str:
+            if escape:
+                escape = False
+            elif ch == "\\":
+                escape = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+            continue
+        if ch == "{":
+            depth += 1
+            continue
+        if ch == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : idx + 1]
+    return None
+
+
+def _normalize_action(parsed: dict[str, Any]) -> dict[str, Any] | None:
+    required = {"decision", "labels", "priority", "review_summary"}
+    if not required.issubset(set(parsed.keys())):
+        return None
+
+    decision = str(parsed.get("decision", "")).strip().lower()
+    priority = str(parsed.get("priority", "")).strip().lower()
+    review_summary = str(parsed.get("review_summary", "")).strip()
+
+    if decision not in {"approve", "request_changes", "close"}:
+        return None
+    if priority not in {"low", "medium", "high", "critical"}:
+        return None
+    if not review_summary:
+        return None
+
+    raw_labels = parsed.get("labels", [])
+    if isinstance(raw_labels, str):
+        raw_labels = [part.strip() for part in raw_labels.split(",")]
+    if not isinstance(raw_labels, list):
+        return None
+
+    labels: list[str] = []
+    seen: set[str] = set()
+    for label in raw_labels:
+        normalized = str(label).strip().lower()
+        if normalized in ALLOWED_LABELS and normalized not in seen:
+            labels.append(normalized)
+            seen.add(normalized)
+    if not labels:
+        labels = ["bug"]
+
+    return {
+        "decision": decision,
+        "labels": labels,
+        "priority": priority,
+        "review_summary": review_summary[:500],
+    }
+
+
 def safe_json_loads(raw: str) -> dict[str, Any] | None:
-    cleaned = strip_code_fences(raw)
-    if not cleaned:
+    candidate = _extract_first_json_object(raw)
+    if not candidate:
         return None
     try:
-        parsed = json.loads(cleaned)
+        parsed = json.loads(candidate)
     except json.JSONDecodeError:
         return None
-    required = {"decision", "labels", "priority", "review_summary"}
-    if set(parsed.keys()) != required:
+    if not isinstance(parsed, dict):
         return None
-    if parsed["decision"] not in {"approve", "request_changes", "close"}:
-        return None
-    if parsed["priority"] not in {"low", "medium", "high", "critical"}:
-        return None
-    if not isinstance(parsed["labels"], list):
-        return None
-    if any(label not in ALLOWED_LABELS for label in parsed["labels"]):
-        return None
-    if not isinstance(parsed["review_summary"], str) or not parsed["review_summary"].strip():
-        return None
-    return parsed
+    return _normalize_action(parsed)
+
+
+def heuristic_action_from_text(raw: str, task: str) -> dict[str, Any]:
+    text = strip_code_fences(raw).lower()
+
+    if "close" in text:
+        decision = "close"
+    elif "approve" in text or "lgtm" in text:
+        decision = "approve"
+    else:
+        decision = "request_changes"
+
+    if "critical" in text:
+        priority = "critical"
+    elif "high" in text:
+        priority = "high"
+    elif "medium" in text:
+        priority = "medium"
+    else:
+        priority = "low"
+
+    labels: list[str] = []
+    for label in ALLOWED_LABELS:
+        if label in text:
+            labels.append(label)
+
+    keyword_to_label = {
+        "race": "bug",
+        "toctou": "bug",
+        "concurrency": "bug",
+        "security": "security",
+        "token": "security",
+        "expiry": "security",
+        "break": "breaking-change",
+        "test": "needs-tests",
+        "docs": "documentation",
+        "urgent": "urgent",
+    }
+    for key, value in keyword_to_label.items():
+        if key in text and value not in labels:
+            labels.append(value)
+
+    if not labels:
+        labels = bootstrap_action(task)["labels"]
+
+    words = [w for w in re.split(r"\s+", strip_code_fences(raw)) if w]
+    summary = " ".join(words[:30]).strip()
+    if not summary:
+        summary = bootstrap_action(task)["review_summary"]
+
+    action = {
+        "decision": decision,
+        "labels": labels[:4],
+        "priority": priority,
+        "review_summary": summary[:500],
+    }
+    normalized = _normalize_action(action)
+    if normalized is None:
+        return bootstrap_action(task)
+    return normalized
 
 
 @dataclass
@@ -139,7 +265,7 @@ def format_observation_prompt(observation: dict[str, Any]) -> str:
         f"{SYSTEM_PROMPT}\n\n"
         "Current observation:\n"
         f"{json.dumps(payload, ensure_ascii=True)}\n\n"
-        "Return valid JSON only."
+        "Important: output a single JSON object only. No markdown. No prose. No code fences."
     )
 
 
@@ -299,7 +425,9 @@ def build_grpo_config(args: argparse.Namespace, output_dir: Path) -> GRPOConfig:
         "max_completion_length": args.max_completion_length,
         "logging_steps": args.logging_steps,
         "save_steps": args.save_steps,
-        "bf16": torch.cuda.is_available(),
+        "bf16": torch.cuda.is_available() and torch.cuda.is_bf16_supported(),
+        "fp16": torch.cuda.is_available() and not torch.cuda.is_bf16_supported(),
+        "num_generations": args.num_generations,
         "report_to": "none",
     }
     valid_params = inspect.signature(GRPOConfig.__init__).parameters
@@ -375,6 +503,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-new-tokens", type=int, default=220)
     parser.add_argument("--logging-steps", type=int, default=5)
     parser.add_argument("--save-steps", type=int, default=50)
+    parser.add_argument("--num-generations", type=int, default=2)
     parser.add_argument("--episodes-per-task", type=int, default=2)
     parser.add_argument("--max-episode-steps", type=int, default=6)
     parser.add_argument("--use-unsloth", action="store_true")
@@ -411,16 +540,18 @@ def main() -> int:
 
     reward_rows: list[dict[str, Any]] = []
     reward_components: list[dict[str, Any]] = []
+    parse_fallback_count = 0
 
     def env_reward_fn(completions: list[Any], task: list[str] | None = None, **_kwargs: Any) -> list[float]:
+        nonlocal parse_fallback_count
         rewards: list[float] = []
         tasks = task if isinstance(task, list) else ["easy"] * len(completions)
         for idx, completion in enumerate(completions):
             raw = extract_completion_text(completion)
             parsed = safe_json_loads(raw)
             if parsed is None:
-                rewards.append(MIN_REWARD)
-                continue
+                parse_fallback_count += 1
+                parsed = heuristic_action_from_text(raw, tasks[idx])
             score, breakdown = env.validate(tasks[idx], parsed)
             rewards.append(score)
             if breakdown:
@@ -477,6 +608,7 @@ def main() -> int:
         "baseline": baseline,
         "after_training": after,
         "improvement_overall": after["overall"] - baseline["overall"],
+        "parse_fallback_count": parse_fallback_count,
         "config": vars(args),
     }
     with (output_dir / "logs" / "training_summary.json").open("w", encoding="utf-8") as handle:

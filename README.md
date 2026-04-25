@@ -86,10 +86,12 @@ In a second terminal:
 ```bash
 python train_grpo.py ^
   --env-base-url http://127.0.0.1:7860 ^
-  --model-name Qwen/Qwen2.5-3B-Instruct ^
-  --use-unsloth ^
-  --num-samples 120 ^
+  --model-name Qwen/Qwen2.5-0.5B-Instruct ^
+  --num-samples 24 ^
   --num-train-epochs 1 ^
+  --num-generations 2 ^
+  --max-completion-length 220 ^
+  --max-new-tokens 220 ^
   --output-dir artifacts/grpo_run
 ```
 
@@ -121,7 +123,7 @@ docker run --rm -p 7860:7860 pr-review-env
 In a second terminal:
 ```bash
 python inference.py
-python train_grpo.py --env-base-url http://127.0.0.1:7860 --num-train-epochs 1 --output-dir artifacts/grpo_judge_run
+python train_grpo.py --env-base-url http://127.0.0.1:7860 --model-name Qwen/Qwen2.5-0.5B-Instruct --num-generations 2 --num-train-epochs 1 --output-dir artifacts/grpo_judge_run
 ```
 
 Then inspect:

@@ -50,6 +50,11 @@ def clamp_reward(value: float) -> float:
     return max(MIN_REWARD, min(MAX_REWARD, value))
 
 
+def clamp_parse_failure_reward(value: float) -> float:
+    # Allow a much lower floor for parse failures so bad outputs are clearly separated.
+    return max(1e-6, min(MAX_REWARD, value))
+
+
 def strip_code_fences(raw: str) -> str:
     cleaned = raw.strip()
     if cleaned.startswith("```"):
@@ -671,6 +676,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--env-max-retries", type=int, default=3)
     parser.add_argument("--strict-json-reward", action="store_true", default=True)
     parser.add_argument("--no-strict-json-reward", dest="strict_json_reward", action="store_false")
+    parser.add_argument("--strict-json-warmup-steps", type=int, default=0)
     parser.add_argument("--parse-failure-reward", type=float, default=0.01)
     parser.add_argument("--use-unsloth", action="store_true")
     parser.add_argument("--lora-r", type=int, default=16)
@@ -733,14 +739,17 @@ def main() -> int:
         nonlocal parse_fallback_count, parse_success_count
         rewards: list[float] = []
         tasks = task if isinstance(task, list) else ["easy"] * len(completions)
+        strict_mode_active = args.strict_json_reward and (
+            args.strict_json_warmup_steps <= 0 or len(reward_rows) >= args.strict_json_warmup_steps
+        )
         for idx, completion in enumerate(completions):
             raw = extract_completion_text(completion)
-            parsed = safe_json_loads(raw, require_exact=args.strict_json_reward)
+            parsed = safe_json_loads(raw, require_exact=strict_mode_active)
             if parsed is None:
                 parse_fallback_count += 1
-                if args.strict_json_reward:
+                if strict_mode_active:
                     # In strict RLVR mode, malformed JSON gets minimum reward.
-                    rewards.append(clamp_reward(args.parse_failure_reward))
+                    rewards.append(clamp_parse_failure_reward(args.parse_failure_reward))
                     continue
                 parsed = heuristic_action_from_text(raw, tasks[idx])
             else:

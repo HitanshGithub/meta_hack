@@ -24,6 +24,14 @@ EXTRA_ARGS=""
 if [ "${TRAIN_SKIP_INITIAL_EVAL:-0}" = "1" ]; then
   EXTRA_ARGS="${EXTRA_ARGS} --skip-initial-eval"
 fi
+if [ "${TRAIN_STRICT_JSON_REWARD:-0}" = "1" ]; then
+  EXTRA_ARGS="${EXTRA_ARGS} --strict-json-reward"
+  if [ -n "${TRAIN_STRICT_JSON_WARMUP_STEPS:-}" ]; then
+    EXTRA_ARGS="${EXTRA_ARGS} --strict-json-warmup-steps ${TRAIN_STRICT_JSON_WARMUP_STEPS}"
+  fi
+else
+  EXTRA_ARGS="${EXTRA_ARGS} --no-strict-json-reward"
+fi
 
 python -u train_grpo.py \
   --env-base-url "${ENV_BASE_URL}" \
@@ -37,8 +45,7 @@ python -u train_grpo.py \
   --episodes-per-task "${TRAIN_EPISODES_PER_TASK:-4}" \
   --max-episode-steps "${TRAIN_MAX_EPISODE_STEPS:-3}" \
   --eval-tasks-per-difficulty "${TRAIN_EVAL_TASKS_PER_DIFFICULTY:-1}" \
-  --strict-json-reward \
-  --parse-failure-reward "${TRAIN_PARSE_FAILURE_REWARD:-0.005}" \
+  --parse-failure-reward "${TRAIN_PARSE_FAILURE_REWARD:-0.001}" \
   --max-completion-length "${TRAIN_MAX_COMPLETION_LENGTH:-96}" \
   --max-new-tokens "${TRAIN_MAX_NEW_TOKENS:-96}" \
   --output-dir "${OUTPUT_DIR}" \

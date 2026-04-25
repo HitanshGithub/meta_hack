@@ -9,8 +9,17 @@ from ..reward import compute_reward
 _FIXTURE_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "pr_hard.json"
 
 with _FIXTURE_PATH.open("r", encoding="utf-8") as f:
-    FIXTURE: dict[str, object] = json.load(f)
+    _RAW_FIXTURE = json.load(f)
 
+if isinstance(_RAW_FIXTURE, list):
+    FIXTURES: list[dict[str, object]] = [dict(item) for item in _RAW_FIXTURE]
+else:
+    FIXTURES = [dict(_RAW_FIXTURE)]
+
+if not FIXTURES:
+    raise ValueError("pr_hard.json must contain at least one fixture")
+
+FIXTURE: dict[str, object] = FIXTURES[0]
 GOLD: dict[str, object] = dict(FIXTURE["gold"])
 
 

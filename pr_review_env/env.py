@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import random
 from typing import Any
 
 from .models import Action, Observation, StepResult
 from .reward import _MIN_SCORE, compute_reward_breakdown
-from .tasks.easy import FIXTURE as EASY_FIXTURE, GOLD as EASY_GOLD
-from .tasks.hard import FIXTURE as HARD_FIXTURE, GOLD as HARD_GOLD
-from .tasks.medium import FIXTURE as MEDIUM_FIXTURE, GOLD as MEDIUM_GOLD
+from .tasks.easy import FIXTURES as EASY_FIXTURES
+from .tasks.hard import FIXTURES as HARD_FIXTURES
+from .tasks.medium import FIXTURES as MEDIUM_FIXTURES
 
 
 @dataclass(frozen=True)
@@ -15,8 +16,7 @@ class TaskConfig:
     task_id: str
     description: str
     difficulty: str
-    fixture: dict[str, Any]
-    gold: dict[str, Any]
+    fixtures: list[dict[str, Any]]
     max_steps: int
     expected_score_range: tuple[float, float]
 
@@ -26,8 +26,7 @@ TASK_CONFIGS: dict[str, TaskConfig] = {
         task_id="easy",
         description="Trivial off-by-one bugfix PR with straightforward approval path.",
         difficulty="easy",
-        fixture=EASY_FIXTURE,
-        gold=EASY_GOLD,
+        fixtures=EASY_FIXTURES,
         max_steps=4,
         expected_score_range=(0.01, 0.99),
     ),
@@ -35,8 +34,7 @@ TASK_CONFIGS: dict[str, TaskConfig] = {
         task_id="medium",
         description="Authentication middleware refactor hiding removal of token expiry checks.",
         difficulty="medium",
-        fixture=MEDIUM_FIXTURE,
-        gold=MEDIUM_GOLD,
+        fixtures=MEDIUM_FIXTURES,
         max_steps=6,
         expected_score_range=(0.01, 0.99),
     ),
@@ -44,8 +42,7 @@ TASK_CONFIGS: dict[str, TaskConfig] = {
         task_id="hard",
         description="Redis rate limiter PR with TOCTOU race and conflicting reviewer sentiment.",
         difficulty="hard",
-        fixture=HARD_FIXTURE,
-        gold=HARD_GOLD,
+        fixtures=HARD_FIXTURES,
         max_steps=8,
         expected_score_range=(0.01, 0.99),
     ),
@@ -81,11 +78,12 @@ class PRReviewEnv:
         self._history: list[dict[str, Any]] = []
         self._observation: Observation | None = None
         self._gold: dict[str, Any] = {}
+        self._fixture: dict[str, Any] = {}
         self.reset("easy")
 
     def _build_observation(self, task_name: str) -> Observation:
         task = TASK_CONFIGS[task_name]
-        fixture = task.fixture
+        fixture = self._fixture
         stage_idx = min(max(self._current_step - 1, 0), len(_REVIEW_STAGES) - 1)
         review_stage, stage_prompt = _REVIEW_STAGES[stage_idx]
         return Observation(
@@ -115,7 +113,15 @@ class PRReviewEnv:
         self._last_reward = _MIN_SCORE
         self._done = False
         self._history = []
-        self._gold = dict(TASK_CONFIGS[task_name].gold)
+
+        task_config = TASK_CONFIGS[task_name]
+        if not task_config.fixtures:
+            raise ValueError(f"Task '{task_name}' has no fixtures configured")
+        self._fixture = dict(random.choice(task_config.fixtures))
+        self._gold = dict(self._fixture.get("gold", {}))
+        if not self._gold:
+            raise ValueError(f"Task '{task_name}' fixture missing required 'gold' section")
+
         self._observation = self._build_observation(task_name)
         return self._observation
 

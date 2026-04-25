@@ -32,15 +32,15 @@ python -u train_grpo.py \
   --num-train-epochs "${TRAIN_NUM_TRAIN_EPOCHS:-1}" \
   --per-device-train-batch-size "${TRAIN_BATCH_SIZE:-1}" \
   --gradient-accumulation-steps "${TRAIN_GRAD_ACCUM:-4}" \
-  --num-generations "${TRAIN_NUM_GENERATIONS:-2}" \
+  --num-generations "${TRAIN_NUM_GENERATIONS:-4}" \
   --learning-rate "${TRAIN_LEARNING_RATE:-1e-5}" \
   --episodes-per-task "${TRAIN_EPISODES_PER_TASK:-4}" \
   --max-episode-steps "${TRAIN_MAX_EPISODE_STEPS:-3}" \
   --eval-tasks-per-difficulty "${TRAIN_EVAL_TASKS_PER_DIFFICULTY:-1}" \
   --strict-json-reward \
-  --parse-failure-reward "${TRAIN_PARSE_FAILURE_REWARD:-0.01}" \
-  --max-completion-length "${TRAIN_MAX_COMPLETION_LENGTH:-160}" \
-  --max-new-tokens "${TRAIN_MAX_NEW_TOKENS:-160}" \
+  --parse-failure-reward "${TRAIN_PARSE_FAILURE_REWARD:-0.005}" \
+  --max-completion-length "${TRAIN_MAX_COMPLETION_LENGTH:-96}" \
+  --max-new-tokens "${TRAIN_MAX_NEW_TOKENS:-96}" \
   --output-dir "${OUTPUT_DIR}" \
   ${EXTRA_ARGS} 2>&1 | tee "${OUTPUT_DIR}/training.log"
 

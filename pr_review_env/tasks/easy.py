@@ -10,10 +10,20 @@ from ..reward import compute_reward
 _FIXTURE_PATH = Path(__file__).resolve().parents[2] / "fixtures" / "pr_easy.json"
 
 with _FIXTURE_PATH.open("r", encoding="utf-8") as f:
-    ALL_FIXTURES: list[dict[str, object]] = json.load(f)
+    _RAW_FIXTURE = json.load(f)
 
-# Primary fixture (first entry) for backward compatibility
-FIXTURE: dict[str, object] = ALL_FIXTURES[0]
+if isinstance(_RAW_FIXTURE, list):
+    FIXTURES: list[dict[str, object]] = [dict(item) for item in _RAW_FIXTURE]
+else:
+    FIXTURES = [dict(_RAW_FIXTURE)]
+
+if not FIXTURES:
+    raise ValueError("pr_easy.json must contain at least one fixture")
+
+# Alias for backward compatibility with env.py imports
+ALL_FIXTURES = FIXTURES
+
+FIXTURE: dict[str, object] = FIXTURES[0]
 GOLD: dict[str, object] = dict(FIXTURE["gold"])
 
 

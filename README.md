@@ -46,15 +46,28 @@ Stage-aware weighted score:
 
 Total is clamped to strict `(0, 1)`.
 
+### Latency-Accuracy Tradeoff Scoring
+To better reflect CI/CD deployability, we now compute a latency-aware benchmark score:
+
+- `latency_adjusted_score = raw_reward * latency_discount`
+- `raw_reward` is the existing deterministic environment score
+- `latency_discount` is:
+  - `1.0` when latency is at or below task budget
+  - exponential decay above budget: `exp(-0.35 * max(0, latency_seconds - budget_seconds))`
+  - floored at `0.1` so slow-but-correct agents are penalized but not zeroed
+
+This keeps reward semantics deterministic while adding runtime-aware benchmarking in inference/evaluation pipelines.
+Use both `raw_reward` and `latency_adjusted_score` for analysis to plot an accuracy-speed Pareto frontier.
+
 ## Tasks
 
 **100 tasks** across 3 difficulty levels:
 
-| Difficulty | Count | Max Steps | Example Scenarios |
-|---|---|---|---|
-| Easy | 30 | 4 | Typo fixes, import ordering, dead code removal, dependency pinning |
-| Medium | 35 | 6 | SQL injection, hardcoded credentials, cache invalidation, breaking API changes |
-| Hard | 35 | 8 | TOCTOU races, distributed locks, saga patterns, connection pool exhaustion |
+| Difficulty | Count | Max Steps | Latency Budget (s) | Example Scenarios |
+|---|---:|---:|---:|---|
+| Easy | 30 | 4 | 5.0 | Typo fixes, import ordering, dead code removal, dependency pinning |
+| Medium | 35 | 6 | 8.0 | SQL injection, hardcoded credentials, cache invalidation, breaking API changes |
+| Hard | 35 | 8 | 10.0 | TOCTOU races, distributed locks, saga patterns, connection pool exhaustion |
 
 Backward-compatible task IDs: `easy`, `medium`, `hard` (first fixture per difficulty).
 All 100 tasks are accessible via `GET /tasks` or by ID (e.g. `easy_1012`, `medium_2081`).
@@ -106,6 +119,8 @@ python train_grpo.py ^
 Training outputs:
 - `artifacts/grpo_run/logs/reward_history.csv`
 - `artifacts/grpo_run/logs/reward_components.csv` (if available)
+- `artifacts/grpo_run/logs/evaluation_baseline.csv` (raw + latency metrics)
+- `artifacts/grpo_run/logs/evaluation_after_training.csv` (raw + latency metrics)
 - `artifacts/grpo_run/logs/training_summary.json`
 - `artifacts/grpo_run/logs/before_after.md`
 - `artifacts/grpo_run/plots/reward_curve.png`

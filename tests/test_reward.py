@@ -5,7 +5,12 @@ from __future__ import annotations
 import pytest
 
 from pr_review_env.models import Action, Observation
-from pr_review_env.reward import compute_reward, compute_reward_breakdown
+from pr_review_env.reward import (
+    compute_latency_adjusted_score,
+    compute_latency_discount,
+    compute_reward,
+    compute_reward_breakdown,
+)
 
 
 class TestRewardFunction:
@@ -442,3 +447,29 @@ class TestRewardFunction:
         vague_score = compute_reward_breakdown(obs, vague, gold).summary_score
 
         assert grounded_score > vague_score
+
+
+class TestLatencyDiscount:
+    def test_no_penalty_at_budget_or_faster(self):
+        assert compute_latency_discount(latency_seconds=2.0, budget_seconds=5.0) == 1.0
+        assert compute_latency_discount(latency_seconds=5.0, budget_seconds=5.0) == 1.0
+
+    def test_penalty_above_budget(self):
+        discount = compute_latency_discount(latency_seconds=6.5, budget_seconds=5.0)
+        assert 0.1 <= discount < 1.0
+
+    def test_monotonic_penalty(self):
+        budget = 5.0
+        d1 = compute_latency_discount(latency_seconds=5.1, budget_seconds=budget)
+        d2 = compute_latency_discount(latency_seconds=6.0, budget_seconds=budget)
+        d3 = compute_latency_discount(latency_seconds=9.0, budget_seconds=budget)
+        assert d1 >= d2 >= d3
+
+    def test_discount_floor_clamp(self):
+        discount = compute_latency_discount(latency_seconds=500.0, budget_seconds=5.0)
+        assert discount == 0.1
+
+    def test_latency_adjusted_score_clamps_to_strict_bounds(self):
+        adjusted = compute_latency_adjusted_score(raw_score=0.8, latency_discount=0.5)
+        assert 0.01 <= adjusted <= 0.99
+        assert adjusted == pytest.approx(0.4)

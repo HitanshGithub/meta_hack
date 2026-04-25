@@ -22,9 +22,11 @@ class TaskConfig:
     gold: dict[str, Any]
     max_steps: int
     expected_score_range: tuple[float, float]
+    latency_budget_seconds: float
 
 
 _DIFFICULTY_MAX_STEPS: dict[str, int] = {"easy": 4, "medium": 6, "hard": 8}
+_DIFFICULTY_LATENCY_BUDGET_SECONDS: dict[str, float] = {"easy": 5.0, "medium": 8.0, "hard": 10.0}
 
 
 def _build_task_configs() -> dict[str, TaskConfig]:
@@ -51,6 +53,7 @@ def _build_task_configs() -> dict[str, TaskConfig]:
                 gold=dict(fixture["gold"]),
                 max_steps=max_steps,
                 expected_score_range=(0.01, 0.99),
+                latency_budget_seconds=_DIFFICULTY_LATENCY_BUDGET_SECONDS[difficulty],
             )
 
     return configs
@@ -175,6 +178,7 @@ class PRReviewEnv:
 
         return {
             "task": self._task_name,
+            "latency_budget_seconds": TASK_CONFIGS[self._task_name].latency_budget_seconds,
             "current_step": self._observation.current_step,
             "max_steps": self._observation.max_steps,
             "done": self._done,
@@ -192,6 +196,7 @@ class PRReviewEnv:
                 "difficulty": cfg.difficulty,
                 "max_steps": cfg.max_steps,
                 "expected_score_range": [cfg.expected_score_range[0], cfg.expected_score_range[1]],
+                "latency_budget_seconds": cfg.latency_budget_seconds,
             }
             for cfg in TASK_CONFIGS.values()
         ]

@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict
 
 from pr_review_env.env import PRReviewEnv, TASK_CONFIGS, _serialize_reward_breakdown
 from pr_review_env.models import Action, Observation, StepResult
+from pr_review_env.reward import compute_latency_adjusted_score, compute_latency_discount
 
 # Configure structured logging
 logging.basicConfig(
@@ -160,11 +161,19 @@ def step(action: Action, request: Request, env: PRReviewEnv = Depends(get_env)) 
     
     try:
         result = env.step(action)
-        
         duration = time.time() - start_time
+        task_name = str(result.info.get("task", "easy"))
+        budget_seconds = TASK_CONFIGS[task_name].latency_budget_seconds
+        latency_discount = compute_latency_discount(duration, budget_seconds)
+        latency_adjusted_score = compute_latency_adjusted_score(result.reward, latency_discount)
+        result.info["latency_seconds"] = duration
+        result.info["latency_budget_seconds"] = budget_seconds
+        result.info["latency_discount"] = latency_discount
+        result.info["latency_adjusted_score"] = latency_adjusted_score
+
         logger.info(
             f"Step completed - session: {session_id}, reward: {result.reward:.3f}, "
-            f"done: {result.done}, duration: {duration:.3f}s"
+            f"latency_adjusted: {latency_adjusted_score:.3f}, done: {result.done}, duration: {duration:.3f}s"
         )
         
         return result
@@ -241,6 +250,7 @@ class ValidationRequest(BaseModel):
     
     action: Action
     task: str
+    latency_seconds: float | None = None
 
 
 class ValidationResponse(BaseModel):
@@ -249,6 +259,9 @@ class ValidationResponse(BaseModel):
     valid: bool
     error: str | None = None
     reward_breakdown: dict[str, float] | None = None
+    latency_budget_seconds: float | None = None
+    latency_discount: float | None = None
+    latency_adjusted_score: float | None = None
 
 
 @app.post("/validate", response_model=ValidationResponse)
@@ -278,12 +291,20 @@ def validate_action(body: ValidationRequest) -> ValidationResponse:
             action=body.action,
             gold=gold
         )
+        reward_breakdown = _serialize_reward_breakdown(breakdown)
+        budget_seconds = TASK_CONFIGS[body.task].latency_budget_seconds
+        latency_seconds = max(0.0, float(body.latency_seconds or 0.0))
+        latency_discount = compute_latency_discount(latency_seconds, budget_seconds)
+        latency_adjusted_score = compute_latency_adjusted_score(breakdown.total, latency_discount)
         
         logger.info(f"Validation completed - task: {body.task}, reward: {breakdown.total:.3f}")
         
         return ValidationResponse(
             valid=True,
-            reward_breakdown=_serialize_reward_breakdown(breakdown)
+            reward_breakdown=reward_breakdown,
+            latency_budget_seconds=budget_seconds,
+            latency_discount=latency_discount,
+            latency_adjusted_score=latency_adjusted_score,
         )
         
     except Exception as exc:

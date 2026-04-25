@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 import torch
 from datasets import Dataset
 from peft import LoraConfig, get_peft_model
+from pr_review_env.reward import compute_latency_adjusted_score, compute_latency_discount
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import GRPOConfig, GRPOTrainer
 
@@ -323,20 +324,25 @@ def bootstrap_action(task: str) -> dict[str, Any]:
     }
 
 
-def _fetch_all_task_ids(env: EnvClient) -> dict[str, list[str]]:
-    """Fetch all task IDs from the env server, grouped by difficulty."""
+def _fetch_task_metadata(env: EnvClient) -> tuple[dict[str, list[str]], dict[str, float]]:
+    """Fetch task IDs grouped by difficulty and per-task latency budgets."""
     try:
         req = request.Request(f"{env.base_url}/tasks", method="GET")
         with request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         tasks_by_difficulty: dict[str, list[str]] = {"easy": [], "medium": [], "hard": []}
+        task_budgets: dict[str, float] = {}
         for task in data.get("tasks", []):
             difficulty = task.get("difficulty", "easy")
             tasks_by_difficulty.setdefault(difficulty, []).append(task["id"])
-        return tasks_by_difficulty
+            task_budgets[str(task["id"])] = float(task.get("latency_budget_seconds", 8.0))
+        return tasks_by_difficulty, task_budgets
     except Exception:
         # Fallback to the 3 original tasks if the server doesn't support /tasks
-        return {"easy": ["easy"], "medium": ["medium"], "hard": ["hard"]}
+        return (
+            {"easy": ["easy"], "medium": ["medium"], "hard": ["hard"]},
+            {"easy": 5.0, "medium": 8.0, "hard": 10.0},
+        )
 
 
 def build_training_dataset(
@@ -346,7 +352,7 @@ def build_training_dataset(
     seed: int,
 ) -> Dataset:
     random.seed(seed)
-    tasks_by_difficulty = _fetch_all_task_ids(env)
+    tasks_by_difficulty, _ = _fetch_task_metadata(env)
     difficulties = ["easy", "medium", "hard"]
     stage_choices = [0, 1, 2]
     stage_weights = [0.55, 0.30, 0.15]
@@ -415,10 +421,15 @@ def evaluate_model(
     max_episode_steps: int,
     max_new_tokens: int,
     eval_tasks_per_difficulty: int = 3,
-) -> dict[str, float]:
-    tasks_by_difficulty = _fetch_all_task_ids(env)
+) -> tuple[dict[str, float], list[dict[str, Any]]]:
+    tasks_by_difficulty, task_budgets = _fetch_task_metadata(env)
     task_scores: dict[str, float] = {}
+    evaluation_rows: list[dict[str, Any]] = []
     difficulty_scores: dict[str, list[float]] = {"easy": [], "medium": [], "hard": []}
+    difficulty_latency_adjusted_scores: dict[str, list[float]] = {"easy": [], "medium": [], "hard": []}
+    all_raw_scores: list[float] = []
+    all_latencies: list[float] = []
+    all_latency_adjusted_scores: list[float] = []
 
     for difficulty in ("easy", "medium", "hard"):
         all_tasks = tasks_by_difficulty.get(difficulty, [difficulty])
@@ -426,7 +437,10 @@ def evaluate_model(
         eval_tasks = random.sample(all_tasks, min(eval_tasks_per_difficulty, len(all_tasks)))
         for task in eval_tasks:
             episode_scores: list[float] = []
+            episode_latencies: list[float] = []
+            episode_latency_adjusted_scores: list[float] = []
             for _ in range(episodes_per_task):
+                episode_start = time.perf_counter()
                 observation, session_id = env.reset(task)
                 rewards: list[float] = []
                 for _step in range(max_episode_steps):
@@ -439,19 +453,60 @@ def evaluate_model(
                     observation = result.get("observation", observation)
                     if result.get("done", False):
                         break
-                episode_scores.append(sum(rewards) / len(rewards) if rewards else MIN_REWARD)
+                raw_score = sum(rewards) / len(rewards) if rewards else MIN_REWARD
+                episode_latency_seconds = max(0.0, time.perf_counter() - episode_start)
+                budget_seconds = float(task_budgets.get(task, 8.0))
+                latency_discount = compute_latency_discount(episode_latency_seconds, budget_seconds)
+                latency_adjusted_score = compute_latency_adjusted_score(raw_score, latency_discount)
+
+                episode_scores.append(raw_score)
+                episode_latencies.append(episode_latency_seconds)
+                episode_latency_adjusted_scores.append(latency_adjusted_score)
+                all_raw_scores.append(raw_score)
+                all_latencies.append(episode_latency_seconds)
+                all_latency_adjusted_scores.append(latency_adjusted_score)
+                evaluation_rows.append(
+                    {
+                        "task": task,
+                        "difficulty": difficulty,
+                        "raw_reward": raw_score,
+                        "latency_seconds": episode_latency_seconds,
+                        "latency_budget_seconds": budget_seconds,
+                        "latency_discount": latency_discount,
+                        "latency_adjusted_score": latency_adjusted_score,
+                    }
+                )
             task_mean = float(sum(episode_scores) / len(episode_scores))
+            task_latency_adjusted_mean = float(sum(episode_latency_adjusted_scores) / len(episode_latency_adjusted_scores))
+            task_latency_mean = float(sum(episode_latencies) / len(episode_latencies))
             task_scores[task] = task_mean
+            task_scores[f"{task}_mean_latency_seconds"] = task_latency_mean
+            task_scores[f"{task}_latency_adjusted"] = task_latency_adjusted_mean
             difficulty_scores[difficulty].append(task_mean)
+            difficulty_latency_adjusted_scores[difficulty].append(task_latency_adjusted_mean)
 
     # Compute per-difficulty and overall averages
     for difficulty in ("easy", "medium", "hard"):
         scores = difficulty_scores[difficulty]
         task_scores[f"{difficulty}_avg"] = float(sum(scores) / len(scores)) if scores else MIN_REWARD
+        adjusted_scores = difficulty_latency_adjusted_scores[difficulty]
+        task_scores[f"{difficulty}_latency_adjusted_avg"] = (
+            float(sum(adjusted_scores) / len(adjusted_scores)) if adjusted_scores else MIN_REWARD
+        )
     task_scores["overall"] = float(
         sum(task_scores[f"{d}_avg"] for d in ("easy", "medium", "hard")) / 3.0
     )
-    return task_scores
+    task_scores["overall_latency_adjusted"] = float(
+        sum(task_scores[f"{d}_latency_adjusted_avg"] for d in ("easy", "medium", "hard")) / 3.0
+    )
+    task_scores["mean_raw_reward"] = float(sum(all_raw_scores) / len(all_raw_scores)) if all_raw_scores else MIN_REWARD
+    task_scores["mean_latency_seconds"] = float(sum(all_latencies) / len(all_latencies)) if all_latencies else 0.0
+    task_scores["mean_latency_adjusted_score"] = (
+        float(sum(all_latency_adjusted_scores) / len(all_latency_adjusted_scores))
+        if all_latency_adjusted_scores
+        else MIN_REWARD
+    )
+    return task_scores, evaluation_rows
 
 
 def save_reward_curve(reward_rows: list[dict[str, Any]], output_dir: Path) -> None:
@@ -595,7 +650,7 @@ def main() -> int:
     model, tokenizer = load_model(args)
 
     print("[INFO] Running baseline evaluation")
-    baseline = evaluate_model(
+    baseline, baseline_rows = evaluate_model(
         env=env,
         model=model,
         tokenizer=tokenizer,
@@ -655,7 +710,7 @@ def main() -> int:
     tokenizer.save_pretrained(str(final_model_dir))
 
     print("[INFO] Running post-training evaluation")
-    after = evaluate_model(
+    after, after_rows = evaluate_model(
         env=env,
         model=trainer.model,
         tokenizer=tokenizer,
@@ -665,6 +720,34 @@ def main() -> int:
     )
 
     write_csv(output_dir / "logs" / "reward_history.csv", reward_rows, ["training_step", "mean_reward", "timestamp"])
+    if baseline_rows:
+        write_csv(
+            output_dir / "logs" / "evaluation_baseline.csv",
+            baseline_rows,
+            [
+                "task",
+                "difficulty",
+                "raw_reward",
+                "latency_seconds",
+                "latency_budget_seconds",
+                "latency_discount",
+                "latency_adjusted_score",
+            ],
+        )
+    if after_rows:
+        write_csv(
+            output_dir / "logs" / "evaluation_after_training.csv",
+            after_rows,
+            [
+                "task",
+                "difficulty",
+                "raw_reward",
+                "latency_seconds",
+                "latency_budget_seconds",
+                "latency_discount",
+                "latency_adjusted_score",
+            ],
+        )
     if reward_components:
         component_fields = sorted({key for row in reward_components for key in row.keys()})
         write_csv(output_dir / "logs" / "reward_components.csv", reward_components, component_fields)
@@ -684,9 +767,14 @@ def main() -> int:
         "| Metric | Baseline | Trained |\n"
         "|---|---:|---:|\n"
         f"| Easy Avg | {baseline.get('easy_avg', baseline.get('easy', 0)):.3f} | {after.get('easy_avg', after.get('easy', 0)):.3f} |\n"
+        f"| Easy Latency-Adjusted Avg | {baseline.get('easy_latency_adjusted_avg', 0):.3f} | {after.get('easy_latency_adjusted_avg', 0):.3f} |\n"
         f"| Medium Avg | {baseline.get('medium_avg', baseline.get('medium', 0)):.3f} | {after.get('medium_avg', after.get('medium', 0)):.3f} |\n"
+        f"| Medium Latency-Adjusted Avg | {baseline.get('medium_latency_adjusted_avg', 0):.3f} | {after.get('medium_latency_adjusted_avg', 0):.3f} |\n"
         f"| Hard Avg | {baseline.get('hard_avg', baseline.get('hard', 0)):.3f} | {after.get('hard_avg', after.get('hard', 0)):.3f} |\n"
+        f"| Hard Latency-Adjusted Avg | {baseline.get('hard_latency_adjusted_avg', 0):.3f} | {after.get('hard_latency_adjusted_avg', 0):.3f} |\n"
         f"| Overall | {baseline['overall']:.3f} | {after['overall']:.3f} |\n"
+        f"| Overall Latency-Adjusted | {baseline.get('overall_latency_adjusted', 0):.3f} | {after.get('overall_latency_adjusted', 0):.3f} |\n"
+        f"| Mean Latency (s) | {baseline.get('mean_latency_seconds', 0):.3f} | {after.get('mean_latency_seconds', 0):.3f} |\n"
     )
     with (output_dir / "logs" / "before_after.md").open("w", encoding="utf-8") as handle:
         handle.write(markdown)

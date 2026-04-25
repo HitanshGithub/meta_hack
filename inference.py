@@ -4,11 +4,13 @@ import json
 import os
 import re
 import sys
+import time
 from typing import Any
 from urllib import error, request
 
 from dotenv import load_dotenv
 from openai import OpenAI
+from pr_review_env.reward import compute_latency_adjusted_score, compute_latency_discount
 
 load_dotenv()
 
@@ -22,6 +24,7 @@ MAX_STEPS = int(os.getenv("MAX_STEPS", "8"))
 MIN_SCORE = 0.01
 MAX_SCORE = 0.99
 TASKS: tuple[str, ...] | None = None  # Populated dynamically at runtime
+TASK_BUDGETS: dict[str, float] = {}
 VALID_DECISIONS = {"approve", "request_changes", "close"}
 VALID_PRIORITIES = {"low", "medium", "high", "critical"}
 VALID_LABELS = {
@@ -206,12 +209,17 @@ def _llm_action(client: OpenAI, observation: dict[str, Any]) -> tuple[dict[str, 
 
 
 def run_task(client: OpenAI, task: str) -> None:
-    print(f"[START] task={task} env={ENV_NAME} model={MODEL_NAME}")
+    budget_seconds = float(TASK_BUDGETS.get(task, 8.0))
+    print(f"[START] task={task} budget_seconds={budget_seconds:.2f} env={ENV_NAME} model={MODEL_NAME}")
 
     rewards: list[float] = []
+    step_latencies: list[float] = []
+    step_discounts: list[float] = []
+    step_latency_adjusted_scores: list[float] = []
     done = False
     success = False
     steps = 0
+    episode_start = time.perf_counter()
 
     try:
         observation, session_id = _http_post("/reset", {"task": task})
@@ -220,15 +228,23 @@ def run_task(client: OpenAI, task: str) -> None:
         return
 
     for step in range(1, MAX_STEPS + 1):
+        step_start = time.perf_counter()
         action, action_error = _llm_action(client, observation)
 
         if action is None:
+            step_latency_seconds = time.perf_counter() - step_start
+            discount = compute_latency_discount(step_latency_seconds, budget_seconds)
             reward_value = MIN_SCORE
+            latency_adjusted_score = compute_latency_adjusted_score(reward_value, discount)
             rewards.append(reward_value)
+            step_latencies.append(step_latency_seconds)
+            step_discounts.append(discount)
+            step_latency_adjusted_scores.append(latency_adjusted_score)
             steps = step
             print(
                 f"[STEP] step={step} action=null reward={_format_score(reward_value)} "
-                f"done=false error={action_error or 'null'}"
+                f"latency_seconds={step_latency_seconds:.3f} latency_discount={discount:.3f} "
+                f"latency_adjusted_score={_format_score(latency_adjusted_score)} done=false error={action_error or 'null'}"
             )
             continue
 
@@ -243,43 +259,63 @@ def run_task(client: OpenAI, task: str) -> None:
             done = False
             step_error = f"env_error:{exc}"
 
+        step_latency_seconds = time.perf_counter() - step_start
+        discount = compute_latency_discount(step_latency_seconds, budget_seconds)
+        latency_adjusted_score = compute_latency_adjusted_score(reward_value, discount)
         rewards.append(reward_value)
+        step_latencies.append(step_latency_seconds)
+        step_discounts.append(discount)
+        step_latency_adjusted_scores.append(latency_adjusted_score)
         steps = step
         print(
             f"[STEP] step={step} action={_format_action(action)} reward={_format_score(reward_value)} "
-            f"done={str(done).lower()} error={step_error}"
+            f"latency_seconds={step_latency_seconds:.3f} latency_discount={discount:.3f} "
+            f"latency_adjusted_score={_format_score(latency_adjusted_score)} done={str(done).lower()} error={step_error}"
         )
 
         if done:
             success = True
             break
 
+    episode_latency_seconds = time.perf_counter() - episode_start
+    episode_discount = compute_latency_discount(episode_latency_seconds, budget_seconds)
     score = _bounded_score(sum(rewards) / len(rewards)) if rewards else MIN_SCORE
+    latency_adjusted_score = compute_latency_adjusted_score(score, episode_discount)
+    mean_step_latency = (sum(step_latencies) / len(step_latencies)) if step_latencies else 0.0
     rewards_serialized = ",".join(_format_score(value) for value in rewards)
     print(
         f"[END] success={str(success).lower()} steps={steps} score={_format_score(score)} "
+        f"latency_seconds={episode_latency_seconds:.3f} mean_step_latency_seconds={mean_step_latency:.3f} "
+        f"latency_discount={episode_discount:.3f} latency_adjusted_score={_format_score(latency_adjusted_score)} "
         f"rewards={rewards_serialized}"
     )
 
 
-def _fetch_tasks() -> tuple[str, ...]:
-    """Fetch all task IDs from the env server, falling back to the 3 originals."""
+def _fetch_task_metadata() -> tuple[tuple[str, ...], dict[str, float]]:
+    """Fetch task IDs and latency budgets from the env server."""
     try:
         req = request.Request(f"{ENV_BASE_URL}/tasks", method="GET")
         with request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-        task_ids = [t["id"] for t in data.get("tasks", [])]
+        task_ids = [str(t["id"]) for t in data.get("tasks", [])]
+        budgets = {
+            str(t["id"]): float(t.get("latency_budget_seconds", 8.0))
+            for t in data.get("tasks", [])
+            if "id" in t
+        }
         if task_ids:
-            return tuple(task_ids)
+            return tuple(task_ids), budgets
     except Exception:
         pass
-    return ("easy", "medium", "hard")
+    fallback_tasks = ("easy", "medium", "hard")
+    fallback_budgets = {"easy": 5.0, "medium": 8.0, "hard": 10.0}
+    return fallback_tasks, fallback_budgets
 
 
 def main() -> int:
-    global TASKS
+    global TASKS, TASK_BUDGETS
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
-    TASKS = _fetch_tasks()
+    TASKS, TASK_BUDGETS = _fetch_task_metadata()
     print(f"[INFO] Running inference on {len(TASKS)} tasks")
     for task in TASKS:
         run_task(client, task)

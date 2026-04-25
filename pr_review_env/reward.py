@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from .models import Action, Observation, Reward
@@ -15,6 +16,8 @@ _PRIORITY_ORDER: dict[str, int] = {
 # as required by the OpenEnv validator.
 _MIN_SCORE = 0.01
 _MAX_SCORE = 0.99
+_LATENCY_DISCOUNT_FLOOR = 0.1
+_LATENCY_DECAY_ALPHA = 0.35
 
 
 def _build_task_evidence() -> dict[str, dict[str, list[str]]]:
@@ -56,6 +59,29 @@ _TASK_EVIDENCE: dict[str, dict[str, list[str]]] = _build_task_evidence()
 def _clamp(value: float) -> float:
     """Clamp a score to be strictly between 0 and 1."""
     return max(_MIN_SCORE, min(_MAX_SCORE, value))
+
+
+def compute_latency_discount(latency_seconds: float, budget_seconds: float) -> float:
+    """
+    Compute a smooth latency discount in (0, 1].
+
+    We intentionally use an exponential tail after the budget:
+    discount = exp(-alpha * max(0, latency - budget)).
+    This is easy to interpret, deterministic, and gives smooth penalties.
+    The result is floored to keep slow-but-correct agents non-zero.
+    """
+    safe_latency = max(0.0, float(latency_seconds))
+    safe_budget = max(1e-6, float(budget_seconds))
+    over_budget = max(0.0, safe_latency - safe_budget)
+    if over_budget <= 0.0:
+        return 1.0
+    discount = math.exp(-_LATENCY_DECAY_ALPHA * over_budget)
+    return max(_LATENCY_DISCOUNT_FLOOR, min(1.0, discount))
+
+
+def compute_latency_adjusted_score(raw_score: float, latency_discount: float) -> float:
+    """Multiply raw reward by latency discount with strict score clamping."""
+    return _clamp(float(raw_score) * max(0.0, min(1.0, float(latency_discount))))
 
 
 def _review_stage_weights(observation: Observation) -> tuple[float, float, float, float]:

@@ -167,6 +167,8 @@ class TestPRReviewEnv:
             assert "description" in task
             assert "difficulty" in task
             assert "max_steps" in task
+            assert "latency_budget_seconds" in task
+            assert task["latency_budget_seconds"] > 0
             assert "expected_score_range" in task
             assert isinstance(task["expected_score_range"], list)
             assert len(task["expected_score_range"]) == 2
@@ -280,6 +282,8 @@ class TestPRReviewEnv:
             assert hasattr(config, 'gold')
             assert hasattr(config, 'max_steps')
             assert hasattr(config, 'expected_score_range')
+            assert hasattr(config, 'latency_budget_seconds')
+            assert config.latency_budget_seconds > 0
             
             # Check fixture has required keys
             fixture = config.fixture
@@ -294,6 +298,11 @@ class TestPRReviewEnv:
             gold = config.gold
             required_gold_keys = {'decision', 'labels', 'priority', 'gold_keywords'}
             assert set(gold.keys()) == required_gold_keys
+
+    def test_latency_budget_defaults_by_difficulty(self):
+        assert TASK_CONFIGS["easy"].latency_budget_seconds == 5.0
+        assert TASK_CONFIGS["medium"].latency_budget_seconds == 8.0
+        assert TASK_CONFIGS["hard"].latency_budget_seconds == 10.0
 
     def test_environment_state_persistence(self):
         """Test environment state persists across operations"""

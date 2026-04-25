@@ -21,6 +21,7 @@ from train_grpo import (
     bootstrap_action,
     clamp_reward,
     heuristic_action_from_text,
+    evaluate_model,
 )
 
 
@@ -230,3 +231,63 @@ class TestHeuristicAction:
         action = heuristic_action_from_text("", "easy")
         assert action["decision"] in {"approve", "request_changes", "close"}
         assert isinstance(action["labels"], list)
+
+
+class TestLatencyAwareEvaluation:
+    def test_evaluate_model_reports_latency_metrics(self, monkeypatch):
+        class FakeEnv:
+            def reset(self, task):
+                return {
+                    "task_name": task,
+                    "title": "t",
+                    "description": "d",
+                    "diff": "diff",
+                    "comments": [],
+                    "files_changed": ["a.py"],
+                    "author": "u",
+                    "base_branch": "main",
+                    "additions": 1,
+                    "deletions": 1,
+                    "current_step": 1,
+                    "max_steps": 1,
+                    "review_stage": "identify_risk",
+                    "stage_prompt": "Identify risk",
+                }, "s1"
+
+            def step(self, action, session_id):
+                return {"reward": 0.8, "done": True, "observation": {"task_name": "easy"}}
+
+        monkeypatch.setattr(
+            "train_grpo._fetch_task_metadata",
+            lambda _env: ({"easy": ["easy_1"], "medium": [], "hard": []}, {"easy_1": 0.001}),
+        )
+        monkeypatch.setattr(
+            "train_grpo.generate_action_text",
+            lambda model, tokenizer, prompt, max_new_tokens: json.dumps(
+                {
+                    "decision": "approve",
+                    "labels": ["bug"],
+                    "priority": "low",
+                    "review_summary": "Looks good.",
+                }
+            ),
+        )
+
+        metrics, rows = evaluate_model(
+            env=FakeEnv(),
+            model=object(),
+            tokenizer=object(),
+            episodes_per_task=1,
+            max_episode_steps=1,
+            max_new_tokens=64,
+            eval_tasks_per_difficulty=1,
+        )
+
+        assert "mean_raw_reward" in metrics
+        assert "mean_latency_seconds" in metrics
+        assert "mean_latency_adjusted_score" in metrics
+        assert "overall_latency_adjusted" in metrics
+        assert rows
+        assert {"raw_reward", "latency_seconds", "latency_budget_seconds", "latency_discount", "latency_adjusted_score"}.issubset(
+            rows[0].keys()
+        )

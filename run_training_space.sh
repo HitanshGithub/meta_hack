@@ -1,21 +1,26 @@
 #!/bin/sh
-set -eu
+set -eux
 
 echo "[INFO] Starting local API on :7860 for Space health checks..."
 uvicorn server.app:app --host 0.0.0.0 --port 7860 &
 API_PID=$!
+echo "[INFO] API PID: ${API_PID}"
+echo "[INFO] Working directory: $(pwd)"
+echo "[INFO] User: $(id)"
 
 # Allow model download auth from either HF_TOKEN or HUGGINGFACE_HUB_TOKEN secret.
 if [ -n "${HF_TOKEN:-}" ] && [ -z "${HUGGINGFACE_HUB_TOKEN:-}" ]; then
   export HUGGINGFACE_HUB_TOKEN="${HF_TOKEN}"
 fi
+echo "[INFO] HUGGINGFACE_HUB_TOKEN present: $( [ -n "${HUGGINGFACE_HUB_TOKEN:-}" ] && echo yes || echo no )"
 
 ENV_BASE_URL="${TRAIN_ENV_BASE_URL:-https://hitanshjain1812-mete-final.hf.space}"
 MODEL_NAME="${TRAIN_MODEL_NAME:-google/gemma-2-9b-it}"
-OUTPUT_DIR="${TRAIN_OUTPUT_DIR:-artifacts/grpo_hf_space_run}"
+OUTPUT_DIR="${TRAIN_OUTPUT_DIR:-/home/appuser/artifacts/grpo_hf_space_run}"
+mkdir -p "${OUTPUT_DIR}"
 
 echo "[INFO] Starting GRPO training job..."
-python train_grpo.py \
+python -u train_grpo.py \
   --env-base-url "${ENV_BASE_URL}" \
   --model-name "${MODEL_NAME}" \
   --num-samples "${TRAIN_NUM_SAMPLES:-120}" \
@@ -32,7 +37,7 @@ python train_grpo.py \
   --parse-failure-reward "${TRAIN_PARSE_FAILURE_REWARD:-0.01}" \
   --max-completion-length "${TRAIN_MAX_COMPLETION_LENGTH:-160}" \
   --max-new-tokens "${TRAIN_MAX_NEW_TOKENS:-160}" \
-  --output-dir "${OUTPUT_DIR}" || true
+  --output-dir "${OUTPUT_DIR}" 2>&1 || true
 
 echo "[INFO] Training finished. Artifacts directory: ${OUTPUT_DIR}"
 echo "[INFO] Keeping Space app alive on :7860"

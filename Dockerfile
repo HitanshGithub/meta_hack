@@ -25,5 +25,5 @@ ENV TORCHINDUCTOR_CACHE_DIR=/home/appuser/.cache/torch_inductor
 
 EXPOSE 7860
 
-# For the training Space, boot API + GRPO runner.
-CMD ["sh", "/app/run_training_space.sh"]
+# For the training Space, boot API + GRPO runner with visible startup diagnostics.
+CMD ["sh", "-lc", "echo '[BOOT] training space container started'; ls -l /app/run_training_space.sh; sh /app/run_training_space.sh"]

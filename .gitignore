@@ -13,3 +13,6 @@ __pycache__/
 # OpenEnv
 server.log
 validate-submission.sh
+
+# Training outputs
+artifacts/

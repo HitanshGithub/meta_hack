@@ -22,6 +22,18 @@ MAX_STEPS = int(os.getenv("MAX_STEPS", "8"))
 MIN_SCORE = 0.01
 MAX_SCORE = 0.99
 TASKS = ("easy", "medium", "hard")
+VALID_DECISIONS = {"approve", "request_changes", "close"}
+VALID_PRIORITIES = {"low", "medium", "high", "critical"}
+VALID_LABELS = {
+    "bug",
+    "security",
+    "enhancement",
+    "documentation",
+    "breaking-change",
+    "needs-tests",
+    "trivial",
+    "urgent",
+}
 
 
 SYSTEM_PROMPT = """You are a senior code review triage agent.
@@ -42,6 +54,52 @@ def _strip_code_fences(raw: str) -> str:
         cleaned = re.sub(r"^```[a-zA-Z0-9_-]*\s*", "", cleaned)
         cleaned = re.sub(r"\s*```$", "", cleaned)
     return cleaned.strip()
+
+def _error_with_raw(prefix: str, raw: str) -> str:
+    compact = " ".join(raw.split())
+    snippet = compact[:280]
+    return f"{prefix} raw={snippet}"
+
+def _normalize_action(parsed: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    required_keys = {"decision", "labels", "priority", "review_summary"}
+    missing = sorted(required_keys - set(parsed.keys()))
+    if missing:
+        return None, f"schema_error:missing_keys:{','.join(missing)}"
+
+    normalized: dict[str, Any] = {
+        "decision": str(parsed.get("decision", "")).strip().lower(),
+        "priority": str(parsed.get("priority", "")).strip().lower(),
+        "review_summary": str(parsed.get("review_summary", "")).strip(),
+    }
+
+    if normalized["decision"] not in VALID_DECISIONS:
+        return None, f"schema_error:invalid_decision:{normalized['decision']}"
+    if normalized["priority"] not in VALID_PRIORITIES:
+        return None, f"schema_error:invalid_priority:{normalized['priority']}"
+
+    raw_labels = parsed.get("labels", [])
+    if isinstance(raw_labels, str):
+        raw_labels = [part.strip() for part in raw_labels.split(",")]
+    if not isinstance(raw_labels, list):
+        return None, "schema_error:labels_not_array"
+
+    deduped_labels: list[str] = []
+    seen: set[str] = set()
+    for label in raw_labels:
+        normalized_label = str(label).strip().lower()
+        if normalized_label in VALID_LABELS and normalized_label not in seen:
+            deduped_labels.append(normalized_label)
+            seen.add(normalized_label)
+
+    # If model only produced invalid labels, keep the episode alive with a safe fallback.
+    if not deduped_labels:
+        deduped_labels = ["bug"]
+    normalized["labels"] = deduped_labels
+
+    if not normalized["review_summary"]:
+        return None, "schema_error:empty_summary"
+
+    return normalized, None
 
 
 def _bounded_score(value: float) -> float:
@@ -124,7 +182,7 @@ def _llm_action(client: OpenAI, observation: dict[str, Any]) -> tuple[dict[str, 
             content = response.choices[0].message.content or ""
             cleaned = _strip_code_fences(content)
             if not cleaned:
-                last_error = "json_decode_error:empty_response"
+                last_error = _error_with_raw("json_decode_error:empty_response", content)
                 messages.append({"role": "assistant", "content": content})
                 messages.append({"role": "user", "content": "Return valid JSON only with exactly the required keys."})
                 continue
@@ -132,7 +190,7 @@ def _llm_action(client: OpenAI, observation: dict[str, Any]) -> tuple[dict[str, 
                 parsed = json.loads(cleaned)
                 break
             except json.JSONDecodeError as exc:
-                last_error = f"json_decode_error:{exc.msg}"
+                last_error = _error_with_raw(f"json_decode_error:{exc.msg}", content)
                 messages.append({"role": "assistant", "content": content})
                 messages.append({"role": "user", "content": "Your last response was invalid. Return valid JSON only."})
         else:
@@ -140,35 +198,11 @@ def _llm_action(client: OpenAI, observation: dict[str, Any]) -> tuple[dict[str, 
     except Exception as exc:
         return None, f"llm_error:{exc}"
 
-    required_keys = {"decision", "labels", "priority", "review_summary"}
-    if set(parsed.keys()) != required_keys:
-        return None, "schema_error:invalid_keys"
+    normalized, normalize_error = _normalize_action(parsed)
+    if normalize_error:
+        return None, _error_with_raw(normalize_error, cleaned)
 
-    valid_decisions = {"approve", "request_changes", "close"}
-    valid_priorities = {"low", "medium", "high", "critical"}
-    valid_labels = {
-        "bug",
-        "security",
-        "enhancement",
-        "documentation",
-        "breaking-change",
-        "needs-tests",
-        "trivial",
-        "urgent",
-    }
-
-    if parsed["decision"] not in valid_decisions:
-        return None, f"schema_error:invalid_decision:{parsed['decision']}"
-    if parsed["priority"] not in valid_priorities:
-        return None, f"schema_error:invalid_priority:{parsed['priority']}"
-    if not isinstance(parsed["labels"], list):
-        return None, "schema_error:labels_not_array"
-    if any(label not in valid_labels for label in parsed["labels"]):
-        return None, "schema_error:invalid_labels"
-    if not isinstance(parsed["review_summary"], str) or not parsed["review_summary"].strip():
-        return None, "schema_error:empty_summary"
-
-    return parsed, None
+    return normalized, None
 
 
 def run_task(client: OpenAI, task: str) -> None:

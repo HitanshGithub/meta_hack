@@ -108,22 +108,25 @@ In a second terminal:
 python train_grpo.py ^
   --env-base-url http://127.0.0.1:7860 ^
   --model-name Qwen/Qwen2.5-0.5B-Instruct ^
-  --num-samples 24 ^
+  --num-samples 48 ^
   --num-train-epochs 1 ^
-  --num-generations 2 ^
-  --max-completion-length 220 ^
-  --max-new-tokens 220 ^
+  --num-generations 4 ^
+  --loss-type dr_grpo ^
+  --beta 0.04 ^
+  --num-iterations 2 ^
   --output-dir artifacts/grpo_run
 ```
 
 Training outputs:
 - `artifacts/grpo_run/logs/reward_history.csv`
+- `artifacts/grpo_run/logs/loss_history.csv` (new)
 - `artifacts/grpo_run/logs/reward_components.csv` (if available)
 - `artifacts/grpo_run/logs/evaluation_baseline.csv` (raw + latency metrics)
 - `artifacts/grpo_run/logs/evaluation_after_training.csv` (raw + latency metrics)
 - `artifacts/grpo_run/logs/training_summary.json`
 - `artifacts/grpo_run/logs/before_after.md`
 - `artifacts/grpo_run/plots/reward_curve.png`
+- `artifacts/grpo_run/plots/loss_curve.png` (new)
 - `artifacts/grpo_run/checkpoints/final/`
 
 ## Hugging Face Space Deployment

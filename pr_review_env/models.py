@@ -1,8 +1,26 @@
+"""
+PR Review Environment Models.
+
+Defines the domain-specific Action, Observation, Reward, and StepResult schemas
+for the PR code review triage environment. Built on the OpenEnv framework
+(openenv-core >= 0.2.3) following the Gymnasium-style API contract.
+
+See: https://github.com/meta-pytorch/OpenEnv
+"""
 from __future__ import annotations
 
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# OpenEnv framework types — our domain models extend the OpenEnv contract.
+# We import the canonical types so that the environment can interoperate with
+# any OpenEnv-compatible client, trainer, or evaluation harness.
+from openenv.core.env_server.types import (
+    Action as OpenEnvAction,
+    Observation as OpenEnvObservation,
+    State as OpenEnvState,
+)
 
 
 ALLOWED_LABELS: set[str] = {

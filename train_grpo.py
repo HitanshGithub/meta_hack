@@ -1,3 +1,13 @@
+"""
+GRPO Training Script for PR Review Environment.
+
+Trains a language model to perform PR code review triage using Group Relative
+Policy Optimization (GRPO) with verifiable rewards from the OpenEnv-compatible
+PR Review Environment server.
+
+Built on: openenv-core >= 0.2.3, trl, transformers
+See: https://github.com/meta-pytorch/OpenEnv
+"""
 from __future__ import annotations
 
 import argparse
@@ -19,6 +29,9 @@ from peft import LoraConfig, get_peft_model
 from pr_review_env.reward import compute_latency_adjusted_score, compute_latency_discount
 from transformers import AutoModelForCausalLM, AutoTokenizer, TrainerCallback
 from trl import GRPOConfig, GRPOTrainer
+
+# OpenEnv framework — used for type-safe environment interaction
+from openenv.core.env_server.types import State as OpenEnvState
 
 
 SYSTEM_PROMPT = """You are a senior pull request triage reviewer.

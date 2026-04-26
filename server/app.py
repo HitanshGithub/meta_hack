@@ -1,3 +1,11 @@
+"""
+PR Review Environment — FastAPI Server.
+
+Exposes the PRReviewEnv as an HTTP service following the OpenEnv API contract
+(reset / step / state). Built on the OpenEnv framework (openenv-core >= 0.2.3).
+
+See: https://github.com/meta-pytorch/OpenEnv
+"""
 from __future__ import annotations
 
 import logging
@@ -6,6 +14,11 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict
+
+# OpenEnv framework types for API interoperability
+from openenv.core.env_server.types import (
+    State as OpenEnvState,
+)
 
 from pr_review_env.env import PRReviewEnv, TASK_CONFIGS, _serialize_reward_breakdown
 from pr_review_env.models import Action, Observation, StepResult

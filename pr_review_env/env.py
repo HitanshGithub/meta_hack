@@ -1,7 +1,22 @@
+"""
+PR Review Environment — OpenEnv-compatible implementation.
+
+Implements a deterministic, multi-stage PR code review triage environment
+following the OpenEnv Gymnasium-style API contract (reset / step / state).
+
+Built on: openenv-core >= 0.2.3
+See: https://github.com/meta-pytorch/OpenEnv
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
+
+# OpenEnv framework base types
+from openenv.core.env_server.types import (
+    State as OpenEnvState,
+)
 
 from .models import Action, Observation, StepResult
 from .reward import _MIN_SCORE, compute_reward_breakdown
@@ -83,6 +98,18 @@ def _serialize_reward_breakdown(breakdown: Any) -> dict[str, float]:
 
 
 class PRReviewEnv:
+    """Deterministic PR code review triage environment.
+
+    Implements the OpenEnv Gymnasium-style API contract:
+        - reset(task_name) -> Observation
+        - step(action)     -> StepResult (observation, reward, done, info)
+        - state            -> OpenEnvState (episode_id, step_count)
+
+    Built on openenv-core >= 0.2.3.  See https://github.com/meta-pytorch/OpenEnv
+    """
+
+    SUPPORTS_CONCURRENT_SESSIONS = True
+
     def __init__(self) -> None:
         self._task_name: str = "easy"
         self._current_step: int = 1
@@ -91,6 +118,8 @@ class PRReviewEnv:
         self._history: list[dict[str, Any]] = []
         self._observation: Observation | None = None
         self._gold: dict[str, Any] = {}
+        # OpenEnv State tracking
+        self._episode_id: str = str(uuid4())
         self.reset("easy")
 
     def _build_observation(self, task_name: str) -> Observation:
@@ -117,6 +146,7 @@ class PRReviewEnv:
         )
 
     def reset(self, task_name: str) -> Observation:
+        """Reset the environment for a new episode (OpenEnv contract: reset)."""
         if task_name not in TASK_CONFIGS:
             raise ValueError(f"Unsupported task: {task_name}")
 
@@ -126,14 +156,12 @@ class PRReviewEnv:
         self._done = False
         self._history = []
         self._gold = dict(TASK_CONFIGS[task_name].gold)
+        self._episode_id = str(uuid4())
         self._observation = self._build_observation(task_name)
         return self._observation
 
     def step(self, action: Action) -> StepResult:
-        if self._done:
-            raise RuntimeError("Episode is complete. Call reset() before step().")
-        if self._observation is None:
-            raise RuntimeError("Environment not initialized")
+        """Execute one step in the environment (OpenEnv contract: step)."""
 
         breakdown = compute_reward_breakdown(observation=self._observation, action=action, gold=self._gold)
         self._last_reward = breakdown.total
@@ -172,12 +200,22 @@ class PRReviewEnv:
             },
         )
 
+    @property
+    def state(self) -> OpenEnvState:
+        """Return the current episode state (OpenEnv contract: state)."""
+        return OpenEnvState(
+            episode_id=self._episode_id,
+            step_count=self._current_step,
+        )
+
     def get_state(self) -> dict[str, Any]:
+        """Legacy state dict for the HTTP API (superset of OpenEnv state)."""
         if self._observation is None:
             raise RuntimeError("Environment not initialized")
 
         return {
             "task": self._task_name,
+            "episode_id": self._episode_id,
             "latency_budget_seconds": TASK_CONFIGS[self._task_name].latency_budget_seconds,
             "current_step": self._observation.current_step,
             "max_steps": self._observation.max_steps,

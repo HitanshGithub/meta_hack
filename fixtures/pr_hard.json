@@ -1111,7 +1111,8 @@
         "comments": [
             "greg: Excellent tracing setup with auto-instrumentation. Approve.",
             "helen: LGTM — context propagation across HTTP and DB is well-configured. Please add tests for span creation.",
-            "ivan: Good use of BatchSpanProcessor to avoid performance impact. Approve."
+            "ivan: Good use of BatchSpanProcessor to avoid performance impact. Approve.",
+            "sre-review: tracing bootstrap lacks sampling and PII guardrails; cross-service payloads include sensitive fields in spans."
         ],
         "files_changed": [
             "observability/tracing.py"
@@ -1121,17 +1122,20 @@
         "additions": 30,
         "deletions": 0,
         "gold": {
-            "decision": "approve",
+            "decision": "request_changes",
             "labels": [
-                "enhancement",
-                "needs-tests"
+                "needs-tests",
+                "bug"
             ],
-            "priority": "medium",
+            "priority": "high",
             "gold_keywords": [
                 "distributed tracing",
                 "OpenTelemetry",
                 "observability",
-                "spans"
+                "spans",
+                "sampling policy",
+                "PII redaction",
+                "trace cardinality"
             ]
         }
     },
@@ -1142,7 +1146,8 @@
         "diff": "diff --git a/features/dark_launch.py b/features/dark_launch.py\ndeleted file mode 100644\nindex 0000000..f9a0b1c\n--- a/features/dark_launch.py\n+++ /dev/null\n@@ -1,15 +0,0 @@\n-from __future__ import annotations\n-\n-def dark_launch_handler(request):\n-    '''Shadow traffic handler - never activated.'''\n-    pass\n",
         "comments": [
             "karl: Dead code removal. Approve and close this cleanup.",
-            "lily: Confirmed the flag was never enabled. Close as completed cleanup."
+            "lily: Confirmed the flag was never enabled. Close as completed cleanup.",
+            "ops-review: dark-launch removal also removed shadow-traffic safety hook still referenced by rollback playbook."
         ],
         "files_changed": [
             "features/dark_launch.py"
@@ -1152,16 +1157,20 @@
         "additions": 0,
         "deletions": 15,
         "gold": {
-            "decision": "close",
+            "decision": "request_changes",
             "labels": [
-                "trivial"
+                "breaking-change",
+                "bug"
             ],
-            "priority": "low",
+            "priority": "medium",
             "gold_keywords": [
                 "abandoned",
                 "dead code",
                 "feature flag",
-                "close"
+                "close",
+                "rollback hook",
+                "operational dependency",
+                "cleanup regression"
             ]
         }
     }

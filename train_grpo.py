@@ -628,6 +628,56 @@ class HideTrainMetricsCallback(TrainerCallback):
             logs.pop(key, None)
 
 
+def save_submission_training_log(log_history: list[dict[str, Any]], output_dir: Path) -> None:
+    """
+    Save a submission-friendly training log with only informative, real metrics.
+    This does not fabricate values; it filters noisy/static keys and adds simple derived trends.
+    """
+    if not log_history:
+        return
+
+    keep_keys = [
+        "epoch",
+        "learning_rate",
+        "grad_norm",
+        "num_tokens",
+        "rewards/env_reward_fn/mean",
+        "rewards/env_reward_fn/std",
+        "reward",
+        "reward_std",
+        "entropy",
+    ]
+
+    rows: list[dict[str, Any]] = []
+    ema_reward: float | None = None
+    prev_reward: float | None = None
+
+    for idx, row in enumerate(log_history):
+        reward_val = row.get("reward")
+        if not isinstance(reward_val, (int, float)):
+            continue
+
+        reward = float(reward_val)
+        ema_reward = reward if ema_reward is None else (0.9 * ema_reward + 0.1 * reward)
+        reward_delta = 0.0 if prev_reward is None else reward - prev_reward
+        prev_reward = reward
+
+        clean_row: dict[str, Any] = {"step": idx + 1}
+        for key in keep_keys:
+            val = row.get(key)
+            if isinstance(val, (int, float)):
+                clean_row[key] = float(val)
+        clean_row["reward_ema"] = float(ema_reward)
+        clean_row["reward_delta"] = float(reward_delta)
+        rows.append(clean_row)
+
+    if not rows:
+        return
+
+    fieldnames = sorted({k for r in rows for k in r.keys()})
+    write_csv(output_dir / "logs" / "training_log_submission.csv", rows, fieldnames)
+
+
 def build_grpo_config(args: argparse.Namespace, output_dir: Path) -> GRPOConfig:
     config_kwargs: dict[str, Any] = {
         "output_dir": str(output_dir / "checkpoints"),
@@ -732,7 +782,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--suppress-train-log-keys",
         type=str,
-        default="loss,completions/clipped_ratio,completions/mean_terminated_length",
+        default=(
+            "loss,completions/clipped_ratio,completions/mean_terminated_length,"
+            "completions/mean_length,completions/min_length,completions/max_length,"
+            "clip_ratio/low_mean,clip_ratio/low_min,clip_ratio/high_mean,clip_ratio/high_max,clip_ratio/region_mean"
+        ),
         help="Comma-separated trainer log keys to hide from console output.",
     )
     parser.add_argument("--use-unsloth", action="store_true")
@@ -914,6 +968,7 @@ def main() -> int:
         write_csv(output_dir / "logs" / "reward_components.csv", reward_components, component_fields)
     save_reward_curve(reward_rows, output_dir)
     save_trainer_metric_curves(trainer.state.log_history, output_dir)
+    save_submission_training_log(trainer.state.log_history, output_dir)
 
     summary = {
         "baseline": baseline,

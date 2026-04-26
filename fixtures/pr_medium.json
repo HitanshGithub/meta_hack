@@ -141,7 +141,8 @@
             "jay: Nice, markdown bios look great.",
             "security-kate: CRITICAL: This is an XSS vulnerability. User-supplied markdown is converted to HTML and marked as safe via Markup() without any sanitization. A user could inject <script> tags in their bio.",
             "author-leo: Can't users only write markdown?",
-            "security-kate: Markdown allows raw HTML. A bio like `<script>alert('xss')</script>` would execute in every visitor's browser. Use bleach or a sanitizer."
+            "security-kate: Markdown allows raw HTML. A bio like `<script>alert('xss')</script>` would execute in every visitor's browser. Use bleach or a sanitizer.",
+            "security-bot: BLOCKER - payload '<img src=x onerror=alert(1)>' executed in stored profile rendering test."
         ],
         "files_changed": [
             "templates/profile.py"
@@ -161,7 +162,10 @@
                 "XSS",
                 "cross-site scripting",
                 "sanitize",
-                "Markup"
+                "Markup",
+                "stored payload",
+                "html allowlist",
+                "sanitizer regression"
             ]
         }
     },
@@ -272,7 +276,8 @@
             "vera: We announced this deprecation 6 months ago. Approve.",
             "walt: Wait — our mobile app v3.2.x still hits /api/v1/auth/token. We can't remove v1 until v3.2.x is below 5% of traffic.",
             "xena: Analytics shows v1 still gets ~12% of total API traffic. Removing now will break those clients.",
-            "author-yuri: I thought all clients migrated. Let me check the analytics."
+            "author-yuri: I thought all clients migrated. Let me check the analytics.",
+            "release-bot: BLOCKER - 401 spike observed on /api/v1/auth/token in canary after route removal."
         ],
         "files_changed": [
             "api/router.py"
@@ -284,14 +289,18 @@
         "gold": {
             "decision": "request_changes",
             "labels": [
-                "breaking-change"
+                "breaking-change",
+                "bug"
             ],
             "priority": "high",
             "gold_keywords": [
                 "API versioning",
                 "backward compatibility",
                 "deprecation",
-                "breaking"
+                "breaking",
+                "legacy traffic",
+                "rollback",
+                "migration gate"
             ]
         }
     },
@@ -305,7 +314,8 @@
             "beth: There's no input validation on the email or password fields. Pydantic's str type accepts anything. We need email format validation, password length/complexity requirements, and rate limiting to prevent abuse.",
             "carl: Also no CSRF protection or email verification step.",
             "author-dana: I'll add validation in a follow-up PR.",
-            "beth: Registration without input validation shouldn't ship. Please add at minimum email regex and password length check."
+            "beth: Registration without input validation shouldn't ship. Please add at minimum email regex and password length check.",
+            "security-bot: BLOCKER - weak password accepted in registration abuse test; no throttle detected."
         ],
         "files_changed": [
             "api/routes/auth.py"
@@ -325,7 +335,10 @@
                 "input validation",
                 "registration",
                 "email",
-                "password"
+                "password",
+                "abuse prevention",
+                "password policy",
+                "registration hardening"
             ]
         }
     },
@@ -338,7 +351,8 @@
             "eric: The rename makes sense for internal consistency.",
             "fay: But get_user is part of our public SDK. External consumers import UserService and call get_user(). This rename will break all SDK users. We need a deprecation period or at least an alias.",
             "author-greg: I didn't realize it was in the SDK. Let me add a deprecated alias.",
-            "fay: Please add the alias with a deprecation warning, and add tests for both method names."
+            "fay: Please add the alias with a deprecation warning, and add tests for both method names.",
+            "ci-bot: FAILED - sdk-contract test missing UserService.get_user symbol."
         ],
         "files_changed": [
             "services/user_service.py",
@@ -352,14 +366,18 @@
             "decision": "request_changes",
             "labels": [
                 "breaking-change",
-                "needs-tests"
+                "needs-tests",
+                "bug"
             ],
             "priority": "high",
             "gold_keywords": [
                 "public API",
                 "rename",
                 "breaking change",
-                "SDK"
+                "SDK",
+                "deprecation alias",
+                "sdk contract",
+                "compatibility test"
             ]
         }
     },
@@ -372,7 +390,8 @@
             "helen: Retry logic looks solid. Approve.",
             "ivan: The fixed 1-second delay is problematic. Without exponential backoff and jitter, all failing clients will hammer the partner API at exactly the same 1-second intervals (thundering herd). We should use exponential backoff with random jitter.",
             "jane: Also, this retries on ALL errors including 400/401/403 which are not transient. Only retry on 429, 500, 502, 503.",
-            "author-karl: Good points. I'll add backoff + jitter and filter retryable status codes."
+            "author-karl: Good points. I'll add backoff + jitter and filter retryable status codes.",
+            "sre-bot: Incident replay shows synchronized retry storm at t+1s due fixed delay retries."
         ],
         "files_changed": [
             "clients/partner_api.py"
@@ -387,12 +406,15 @@
                 "bug",
                 "needs-tests"
             ],
-            "priority": "medium",
+            "priority": "high",
             "gold_keywords": [
                 "retry",
                 "backoff",
                 "jitter",
-                "thundering herd"
+                "thundering herd",
+                "retry storm",
+                "retryable statuses",
+                "backoff policy"
             ]
         }
     },
@@ -536,7 +558,8 @@
             "yuri: Clean singleton pattern. Approve.",
             "zara: This singleton is not thread-safe. In a multi-threaded ASGI server like uvicorn with workers, two threads could both see _instance as None and create separate instances with potentially different config values. Use threading.Lock or a module-level instance.",
             "author-adam: uvicorn uses async, not threads.",
-            "zara: uvicorn --workers uses multiprocessing, but gunicorn --threads or running with thread pools makes this racy. Also, the reset() method creates test ordering issues."
+            "zara: uvicorn --workers uses multiprocessing, but gunicorn --threads or running with thread pools makes this racy. Also, the reset() method creates test ordering issues.",
+            "ci-bot: FAILED - concurrent init test intermittently creates multiple Settings instances."
         ],
         "files_changed": [
             "config/settings.py"
@@ -548,14 +571,18 @@
         "gold": {
             "decision": "request_changes",
             "labels": [
-                "bug"
+                "bug",
+                "needs-tests"
             ],
-            "priority": "medium",
+            "priority": "high",
             "gold_keywords": [
                 "thread-safe",
                 "singleton",
                 "race condition",
-                "concurrency"
+                "concurrency",
+                "double initialization",
+                "thread safety",
+                "singleton race"
             ]
         }
     },
@@ -723,7 +750,8 @@
         "diff": "diff --git a/api/routes/health.py b/api/routes/health.py\nnew file mode 100644\nindex 0000000..c4d5e6f\n--- /dev/null\n+++ b/api/routes/health.py\n@@ -0,0 +1,22 @@\n+from __future__ import annotations\n+\n+from fastapi import APIRouter\n+from database import get_session\n+from cache import get_redis\n+\n+router = APIRouter()\n+\n+\n+@router.get(\"/healthz\")\n+async def health_check():\n+    checks = {}\n+    try:\n+        get_session().execute(\"SELECT 1\")\n+        checks[\"database\"] = \"ok\"\n+    except Exception:\n+        checks[\"database\"] = \"error\"\n+    try:\n+        get_redis().ping()\n+        checks[\"redis\"] = \"ok\"\n+    except Exception:\n+        checks[\"redis\"] = \"error\"\n+    status = \"healthy\" if all(v == \"ok\" for v in checks.values()) else \"degraded\"\n+    return {\"status\": status, \"checks\": checks}\n",
         "comments": [
             "quinn: Clean health check. Approve.",
-            "rachel: LGTM, good dependency verification."
+            "rachel: LGTM, good dependency verification.",
+            "sre-review: Liveness must not depend on DB/Redis; staging entered restart loop during dependency outage."
         ],
         "files_changed": [
             "api/routes/health.py"
@@ -733,16 +761,20 @@
         "additions": 22,
         "deletions": 0,
         "gold": {
-            "decision": "approve",
+            "decision": "request_changes",
             "labels": [
-                "enhancement"
+                "bug",
+                "needs-tests"
             ],
-            "priority": "low",
+            "priority": "high",
             "gold_keywords": [
                 "health check",
                 "endpoint",
                 "monitoring",
-                "dependency"
+                "dependency",
+                "liveness readiness split",
+                "restart loop",
+                "dependency isolation"
             ]
         }
     },
@@ -753,7 +785,8 @@
         "diff": "diff --git a/api/validation.py b/api/validation.py\nindex 8d9e0f1..a2b3c4d 100644\n--- a/api/validation.py\n+++ b/api/validation.py\n@@ -10,8 +10,12 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE\n     errors = []\n     for error in exc.errors():\n         field = \" -> \".join(str(loc) for loc in error[\"loc\"])\n-        errors.append({\"field\": field, \"message\": error[\"msg\"]})\n-    return JSONResponse(status_code=422, content={\"errors\": errors})\n+        errors.append({\n+            \"field\": field,\n+            \"message\": error[\"msg\"],\n+            \"type\": error.get(\"type\", \"unknown\"),\n+        })\n+    return JSONResponse(status_code=422, content={\"detail\": errors, \"help\": \"Check field types and constraints.\"})\n",
         "comments": [
             "tara: Much better error messages now. Approve.",
-            "uri: LGTM."
+            "uri: LGTM.",
+            "security-review: validation payload reveals internal schema/type structure in public API responses."
         ],
         "files_changed": [
             "api/validation.py"
@@ -763,16 +796,20 @@
         "additions": 6,
         "deletions": 2,
         "gold": {
-            "decision": "approve",
+            "decision": "request_changes",
             "labels": [
-                "enhancement"
+                "security",
+                "bug"
             ],
-            "priority": "low",
+            "priority": "medium",
             "gold_keywords": [
                 "validation",
                 "error message",
                 "user experience",
-                "API"
+                "API",
+                "information disclosure",
+                "response hardening",
+                "schema leakage"
             ]
         }
     },
@@ -783,7 +820,8 @@
         "diff": "diff --git a/middleware/structured_logger.py b/middleware/structured_logger.py\nnew file mode 100644\nindex 0000000..d5e6f7a\n--- /dev/null\n+++ b/middleware/structured_logger.py\n@@ -0,0 +1,25 @@\n+from __future__ import annotations\n+\n+import json\n+import logging\n+import time\n+from fastapi import Request\n+\n+logger = logging.getLogger(\"access\")\n+\n+\n+async def log_requests(request: Request, call_next):\n+    start = time.monotonic()\n+    response = await call_next(request)\n+    duration = time.monotonic() - start\n+\n+    log_entry = {\n+        \"method\": request.method,\n+        \"path\": request.url.path,\n+        \"status\": response.status_code,\n+        \"duration_ms\": round(duration * 1000, 2),\n+        \"client\": request.client.host if request.client else \"unknown\",\n+    }\n+    logger.info(json.dumps(log_entry))\n+\n+    return response\n",
         "comments": [
             "walt: Clean structured logging. Approve.",
-            "xena: LGTM, this will make log aggregation much easier."
+            "xena: LGTM, this will make log aggregation much easier.",
+            "compliance-bot: IP+path log tuple classified as personal data; retention controls are missing."
         ],
         "files_changed": [
             "middleware/structured_logger.py"
@@ -793,16 +831,20 @@
         "additions": 25,
         "deletions": 0,
         "gold": {
-            "decision": "approve",
+            "decision": "request_changes",
             "labels": [
-                "enhancement"
+                "security",
+                "needs-tests"
             ],
-            "priority": "low",
+            "priority": "medium",
             "gold_keywords": [
                 "logging",
                 "middleware",
                 "structured",
-                "request"
+                "request",
+                "PII handling",
+                "retention policy",
+                "redaction"
             ]
         }
     },
@@ -813,7 +855,8 @@
         "diff": "diff --git a/requirements.txt b/requirements.txt\nindex 1a2b3c4..d5e6f7a 100644\n--- a/requirements.txt\n+++ b/requirements.txt\n@@ -1,5 +1,5 @@\n flask==3.0.0\n-sqlalchemy==1.4.50\n+sqlalchemy==2.0.23\n alembic==1.13.0\n psycopg2-binary==2.9.9\ndiff --git a/database/session.py b/database/session.py\nindex 2b3c4d5..e6f7a8b 100644\n--- a/database/session.py\n+++ b/database/session.py\n@@ -1,8 +1,8 @@\n from sqlalchemy import create_engine\n-from sqlalchemy.orm import sessionmaker\n+from sqlalchemy.orm import Session\n \n engine = create_engine(\"postgresql://localhost/myapp\")\n-SessionLocal = sessionmaker(bind=engine)\n+SessionLocal = Session(engine)\n",
         "comments": [
             "adam: Big upgrade, but necessary. Approve with caveat that we test thoroughly.",
-            "beth: LGTM, the 2.0 API is much cleaner."
+            "beth: LGTM, the 2.0 API is much cleaner.",
+            "ci-bot: FAILED - Session object no longer request-scoped; dependency wiring regression after 2.0 migration."
         ],
         "files_changed": [
             "requirements.txt",
@@ -824,16 +867,20 @@
         "additions": 3,
         "deletions": 3,
         "gold": {
-            "decision": "approve",
+            "decision": "request_changes",
             "labels": [
-                "enhancement"
+                "bug",
+                "breaking-change"
             ],
-            "priority": "medium",
+            "priority": "high",
             "gold_keywords": [
                 "upgrade",
                 "SQLAlchemy",
                 "migration",
-                "ORM"
+                "ORM",
+                "session lifecycle",
+                "runtime regression",
+                "migration compatibility"
             ]
         }
     },
@@ -844,7 +891,8 @@
         "diff": "diff --git a/services/webhook_service.py b/services/webhook_service.py\nnew file mode 100644\nindex 0000000..e6f7a8b\n--- /dev/null\n+++ b/services/webhook_service.py\n@@ -0,0 +1,28 @@\n+from __future__ import annotations\n+\n+import json\n+import logging\n+import requests\n+from typing import Any\n+\n+logger = logging.getLogger(__name__)\n+\n+\n+class WebhookService:\n+    def __init__(self, webhook_url: str, secret: str) -> None:\n+        self._url = webhook_url\n+        self._secret = secret\n+\n+    def send(self, event: str, payload: dict[str, Any]) -> bool:\n+        body = {\"event\": event, \"data\": payload}\n+        headers = {\n+            \"Content-Type\": \"application/json\",\n+            \"X-Webhook-Secret\": self._secret,\n+        }\n+        try:\n+            resp = requests.post(self._url, json=body, headers=headers, timeout=10)\n+            resp.raise_for_status()\n+            return True\n+        except requests.RequestException as e:\n+            logger.error(\"Webhook delivery failed: %s\", e)\n+            return False\n",
         "comments": [
             "dana: Good feature. Tests needed for failure cases. Approve.",
-            "eric: LGTM. Please add integration tests."
+            "eric: LGTM. Please add integration tests.",
+            "security-review: static shared secret header without signature/timestamp permits replay attacks."
         ],
         "files_changed": [
             "services/webhook_service.py"
@@ -854,17 +902,20 @@
         "additions": 28,
         "deletions": 0,
         "gold": {
-            "decision": "approve",
+            "decision": "request_changes",
             "labels": [
-                "enhancement",
+                "security",
                 "needs-tests"
             ],
-            "priority": "medium",
+            "priority": "high",
             "gold_keywords": [
                 "webhook",
                 "notification",
                 "event",
-                "order"
+                "order",
+                "replay protection",
+                "signature",
+                "timestamp validation"
             ]
         }
     },
@@ -875,7 +926,8 @@
         "diff": "diff --git a/services/order_service.py b/services/order_service.py\nnew file mode 100644\nindex 0000000..f7a8b9c\n--- /dev/null\n+++ b/services/order_service.py\n@@ -0,0 +1,22 @@\n+from __future__ import annotations\n+from repositories.order_repo import OrderRepository\n+from models.order import Order\n+\n+\n+class OrderService:\n+    def __init__(self, repo: OrderRepository | None = None) -> None:\n+        self._repo = repo or OrderRepository()\n+\n+    def create_order(self, user_id: int, items: list[dict]) -> Order:\n+        order = Order(user_id=user_id, items=items, status=\"pending\")\n+        return self._repo.save(order)\n+\n+    def get_order(self, order_id: int) -> Order | None:\n+        return self._repo.find_by_id(order_id)\n+\n+    def cancel_order(self, order_id: int) -> Order:\n+        order = self._repo.find_by_id(order_id)\n+        if order is None:\n+            raise ValueError(f\"Order {order_id} not found\")\n+        order.status = \"cancelled\"\n+        return self._repo.save(order)\n",
         "comments": [
             "greg: Good separation of concerns. Approve.",
-            "helen: LGTM, much more testable now."
+            "helen: LGTM, much more testable now.",
+            "ci-bot: FAILED - cancel_order raises uncaught ValueError -> 500, violates API error contract."
         ],
         "files_changed": [
             "services/order_service.py"
@@ -885,16 +937,20 @@
         "additions": 22,
         "deletions": 0,
         "gold": {
-            "decision": "approve",
+            "decision": "request_changes",
             "labels": [
-                "enhancement"
+                "bug",
+                "needs-tests"
             ],
-            "priority": "medium",
+            "priority": "high",
             "gold_keywords": [
                 "refactor",
                 "service layer",
                 "separation",
-                "architecture"
+                "architecture",
+                "error mapping",
+                "api contract",
+                "regression test"
             ]
         }
     },

@@ -15,7 +15,8 @@ from uuid import uuid4
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, Response
 from pydantic import BaseModel, ConfigDict
 
-# OpenEnv framework types for API interoperability
+# OpenEnv framework — base class and types for API interoperability
+from openenv.core.env_server.interfaces import Environment as OpenEnvBaseEnvironment
 from openenv.core.env_server.types import (
     State as OpenEnvState,
 )
@@ -143,7 +144,7 @@ def reset(
             logger.info(f"Created new environment for session: {resolved_session_id}")
         _touch_session(resolved_session_id)
         
-        observation = env.reset(task)
+        observation = env.reset_task(task)
         
         if response:
             response.headers["session_id"] = resolved_session_id
@@ -173,7 +174,7 @@ def step(action: Action, request: Request, env: PRReviewEnv = Depends(get_env)) 
     logger.info(f"Step request - session: {session_id}, action: {action.decision}, labels: {action.labels}")
     
     try:
-        result = env.step(action)
+        result = env.step_review(action)
         duration = time.time() - start_time
         task_name = str(result.info.get("task", "easy"))
         budget_seconds = TASK_CONFIGS[task_name].latency_budget_seconds

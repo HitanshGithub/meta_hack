@@ -2,19 +2,22 @@
 PR Review Environment — OpenEnv-compatible implementation.
 
 Implements a deterministic, multi-stage PR code review triage environment
-following the OpenEnv Gymnasium-style API contract (reset / step / state).
+by inheriting from the official OpenEnv ``Environment`` base class
+(openenv-core >= 0.2.3).
 
-Built on: openenv-core >= 0.2.3
 See: https://github.com/meta-pytorch/OpenEnv
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 from uuid import uuid4
 
-# OpenEnv framework base types
+# OpenEnv framework — inherit the canonical base class and types
+from openenv.core.env_server.interfaces import Environment
 from openenv.core.env_server.types import (
+    Action as OpenEnvAction,
+    Observation as OpenEnvObservation,
     State as OpenEnvState,
 )
 
@@ -97,13 +100,22 @@ def _serialize_reward_breakdown(breakdown: Any) -> dict[str, float]:
     return breakdown.model_dump(exclude={"step_penalty"})
 
 
-class PRReviewEnv:
+class PRReviewEnv(Environment):
     """Deterministic PR code review triage environment.
 
-    Implements the OpenEnv Gymnasium-style API contract:
-        - reset(task_name) -> Observation
-        - step(action)     -> StepResult (observation, reward, done, info)
-        - state            -> OpenEnvState (episode_id, step_count)
+    Inherits from ``openenv.core.env_server.interfaces.Environment`` —
+    the official OpenEnv base class for all environment servers following
+    the Gym/Gymnasium API.
+
+    API contract (from OpenEnv):
+        - reset(seed, episode_id, **kwargs) -> OpenEnvObservation
+        - step(action, timeout_s, **kwargs)  -> OpenEnvObservation
+        - state (property)                   -> OpenEnvState
+
+    Domain-specific helpers:
+        - reset_task(task_name)              -> Observation (rich domain type)
+        - step_review(action)                -> StepResult  (rich domain type)
+        - get_state()                        -> dict        (legacy HTTP API)
 
     Built on openenv-core >= 0.2.3.  See https://github.com/meta-pytorch/OpenEnv
     """
@@ -111,6 +123,9 @@ class PRReviewEnv:
     SUPPORTS_CONCURRENT_SESSIONS = True
 
     def __init__(self) -> None:
+        # Initialize the OpenEnv base class (no transform or rubric needed)
+        super().__init__(transform=None, rubric=None)
+
         self._task_name: str = "easy"
         self._current_step: int = 1
         self._last_reward: float = _MIN_SCORE
@@ -120,7 +135,7 @@ class PRReviewEnv:
         self._gold: dict[str, Any] = {}
         # OpenEnv State tracking
         self._episode_id: str = str(uuid4())
-        self.reset("easy")
+        self.reset_task("easy")
 
     def _build_observation(self, task_name: str) -> Observation:
         task = TASK_CONFIGS[task_name]
@@ -145,8 +160,66 @@ class PRReviewEnv:
             stage_prompt=stage_prompt,
         )
 
-    def reset(self, task_name: str) -> Observation:
-        """Reset the environment for a new episode (OpenEnv contract: reset)."""
+    # ------------------------------------------------------------------
+    # OpenEnv base class abstract methods
+    # ------------------------------------------------------------------
+
+    def reset(
+        self,
+        seed: Optional[int] = None,
+        episode_id: Optional[str] = None,
+        **kwargs: Any,
+    ) -> OpenEnvObservation:
+        """OpenEnv contract: reset the environment.
+
+        Accepts ``task_name`` via **kwargs to select a PR review task.
+        Falls back to ``"easy"`` if not provided.
+        """
+        task_name = kwargs.get("task_name", "easy")
+        obs = self.reset_task(task_name, episode_id=episode_id)
+        return OpenEnvObservation(
+            done=False,
+            reward=0.0,
+            metadata=obs.model_dump(),
+        )
+
+    def step(
+        self,
+        action: OpenEnvAction,
+        timeout_s: Optional[float] = None,
+        **kwargs: Any,
+    ) -> OpenEnvObservation:
+        """OpenEnv contract: execute one step.
+
+        Wraps the domain-specific ``step_review`` and returns an
+        ``OpenEnvObservation`` envelope.
+        """
+        # Deserialize from OpenEnv generic Action -> domain Action
+        domain_action = Action(**action.metadata) if hasattr(action, "metadata") else action
+        result = self.step_review(domain_action)
+        return OpenEnvObservation(
+            done=result.done,
+            reward=result.reward,
+            metadata={
+                "observation": result.observation.model_dump(),
+                "info": result.info,
+            },
+        )
+
+    @property
+    def state(self) -> OpenEnvState:
+        """OpenEnv contract: return current episode state."""
+        return OpenEnvState(
+            episode_id=self._episode_id,
+            step_count=self._current_step,
+        )
+
+    # ------------------------------------------------------------------
+    # Domain-specific methods (used by server/app.py HTTP routes)
+    # ------------------------------------------------------------------
+
+    def reset_task(self, task_name: str, episode_id: str | None = None) -> Observation:
+        """Reset the environment for a new PR review episode."""
         if task_name not in TASK_CONFIGS:
             raise ValueError(f"Unsupported task: {task_name}")
 
@@ -156,13 +229,12 @@ class PRReviewEnv:
         self._done = False
         self._history = []
         self._gold = dict(TASK_CONFIGS[task_name].gold)
-        self._episode_id = str(uuid4())
+        self._episode_id = episode_id or str(uuid4())
         self._observation = self._build_observation(task_name)
         return self._observation
 
-    def step(self, action: Action) -> StepResult:
-        """Execute one step in the environment (OpenEnv contract: step)."""
-
+    def step_review(self, action: Action) -> StepResult:
+        """Execute one review step and return the domain-specific result."""
         breakdown = compute_reward_breakdown(observation=self._observation, action=action, gold=self._gold)
         self._last_reward = breakdown.total
         reward_breakdown = _serialize_reward_breakdown(breakdown)
@@ -198,14 +270,6 @@ class PRReviewEnv:
                 "review_stage": self._history[-1]["review_stage"],
                 "reward_breakdown": reward_breakdown,
             },
-        )
-
-    @property
-    def state(self) -> OpenEnvState:
-        """Return the current episode state (OpenEnv contract: state)."""
-        return OpenEnvState(
-            episode_id=self._episode_id,
-            step_count=self._current_step,
         )
 
     def get_state(self) -> dict[str, Any]:
